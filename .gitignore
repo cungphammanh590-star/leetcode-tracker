@@ -6,9 +6,10 @@ __pycache__/
 venv/
 .env
 *.egg-info/
-*.egg-info/
 dist/
 build/
+release/
+*.spec
 .pytest_cache/
 .mypy_cache/
 *.db

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,11 +22,26 @@ DEFAULT_PORT = 8763
 
 
 def _dashboard_html() -> bytes:
+    candidates: list[Path] = []
+    # PyInstaller / frozen app
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "leetcode_tracker" / "static" / "index.html")
+        candidates.append(Path(meipass) / "static" / "index.html")
+    # beside executable (onedir .app Resources)
+    candidates.append(Path(sys.executable).resolve().parent / "leetcode_tracker" / "static" / "index.html")
+    candidates.append(Path(__file__).with_name("static") / "index.html")
+
+    for path in candidates:
+        try:
+            if path.is_file():
+                return path.read_bytes()
+        except OSError:
+            continue
     try:
         return resources.files("leetcode_tracker").joinpath("static/index.html").read_bytes()
-    except Exception:
-        fallback = Path(__file__).with_name("static") / "index.html"
-        return fallback.read_bytes()
+    except Exception as exc:  # noqa: BLE001
+        raise FileNotFoundError("dashboard index.html not found") from exc
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
