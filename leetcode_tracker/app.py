@@ -113,14 +113,44 @@ def _ensure_bridge(
     return None, False
 
 
-def _keep_alive() -> None:
-    """窗口关闭后仍保持桥接在线，供浏览器扩展使用。"""
-    _log("window closed; keeping bridge alive")
+def _run_background_until_quit(httpd: object) -> None:
+    """关窗（X）后保持桥接；Cmd+Q / 程序坞退出时正常结束并停服务。"""
+    _log("window closed; bridge keeps running in background (Cmd+Q to quit)")
     try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        pass
+        import AppKit
+        from Foundation import NSObject, YES
+    except ImportError:
+        _log("PyObjC unavailable; falling back to simple wait")
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            _shutdown_bridge(httpd)
+        return
+
+    app = AppKit.NSApplication.sharedApplication()
+
+    class AppDelegate(NSObject):
+        def applicationShouldTerminate_(self, _app):
+            _log("quit requested; shutting down bridge")
+            _shutdown_bridge(httpd)
+            return YES
+
+    delegate = AppDelegate.alloc().init()
+    app.setDelegate_(delegate)
+    app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyRegular)
+    app.run()
+
+
+def _shutdown_bridge(httpd: object | None) -> None:
+    if httpd is None:
+        return
+    try:
+        httpd.shutdown()
+    except Exception as exc:  # noqa: BLE001
+        _log(f"bridge shutdown error: {exc}")
 
 
 def run_app(host: Optional[str] = None, port: Optional[int] = None) -> int:
@@ -143,7 +173,8 @@ def run_app(host: Optional[str] = None, port: Optional[int] = None) -> int:
         msg = f"未安装桌面窗口组件。浏览器打开 {base}/ ，日志：{APP_LOG}"
         print(msg)
         _alert("LeetCode Tracker", msg.replace('"', "'"))
-        _keep_alive()
+        if started_here and owned_server is not None:
+            _run_background_until_quit(owned_server)
         return 0
 
     try:
@@ -157,10 +188,11 @@ def run_app(host: Optional[str] = None, port: Optional[int] = None) -> int:
         )
         print(msg)
         _alert("LeetCode Tracker", msg.replace('"', "'"))
-        _keep_alive()
+        if started_here and owned_server is not None:
+            _run_background_until_quit(owned_server)
         return 0
 
+    # webview.start() 返回 = 用户点了窗口 X（非 Cmd+Q 退出）
     if started_here and owned_server is not None:
-        _keep_alive()
-        owned_server.shutdown()
+        _run_background_until_quit(owned_server)
     return 0
