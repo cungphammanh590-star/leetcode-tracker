@@ -1,4 +1,4 @@
-"""路径常量（MVP 硬编码，无配置子系统）。"""
+"""路径常量（数据库路径固定，日报目录见 config）。"""
 
 from __future__ import annotations
 
@@ -11,10 +11,6 @@ def data_dir() -> Path:
 
 def db_path() -> Path:
     return data_dir() / "leetcode.db"
-
-
-def report_dir() -> Path:
-    return Path.home() / "leetcode-reports"
 
 
 def ensure_parent(path: Path) -> None:

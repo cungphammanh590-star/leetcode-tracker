@@ -91,12 +91,17 @@ def render_daily_markdown(stats: OverviewStats, day: str) -> str:
     return "\n".join(lines)
 
 
+def _report_dir(output_dir: Path | None = None) -> Path:
+    if output_dir is None:
+        return Path(load_config()["report_dir"])
+    return output_dir
+
+
 def write_today_report(output_dir: Path | None = None) -> Path:
     day = datetime.now().astimezone().date().isoformat()
-    if output_dir is None:
-        output_dir = Path(load_config()["report_dir"])
-    ensure_dir(output_dir)
-    path = output_dir / f"{day}.md"
+    target_dir = _report_dir(output_dir)
+    ensure_dir(target_dir)
+    path = target_dir / f"{day}.md"
 
     conn = init_db()
     try:
@@ -105,3 +110,23 @@ def write_today_report(output_dir: Path | None = None) -> Path:
     finally:
         conn.close()
     return path
+
+
+def clean_reports(*, today_only: bool = False, output_dir: Path | None = None) -> list[Path]:
+    """删除日报目录中的 Markdown 快照（不影响 SQLite 主数据）。"""
+    target_dir = _report_dir(output_dir)
+    if not target_dir.is_dir():
+        return []
+
+    if today_only:
+        day = datetime.now().astimezone().date().isoformat()
+        candidates = [target_dir / f"{day}.md"]
+    else:
+        candidates = sorted(target_dir.glob("*.md"))
+
+    removed: list[Path] = []
+    for path in candidates:
+        if path.is_file():
+            path.unlink()
+            removed.append(path)
+    return removed

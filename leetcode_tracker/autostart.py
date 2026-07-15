@@ -21,6 +21,24 @@ def plist_path() -> Path:
     return _agents_dir() / f"{LABEL}.plist"
 
 
+def log_paths() -> tuple[Path, Path]:
+    log_dir = Path.home() / "Library" / "Logs"
+    return (
+        log_dir / "leetcode-tracker.out.log",
+        log_dir / "leetcode-tracker.err.log",
+    )
+
+
+def clean_logs() -> list[Path]:
+    """删除自启服务日志文件（不影响 SQLite 与日报）。"""
+    removed: list[Path] = []
+    for path in log_paths():
+        if path.is_file():
+            path.unlink()
+            removed.append(path)
+    return removed
+
+
 def _leetcode_tracker_bin() -> str:
     which = shutil.which("leetcode-tracker")
     if which:

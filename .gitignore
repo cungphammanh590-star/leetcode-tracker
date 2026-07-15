@@ -1,16 +1,30 @@
-node_modules/
-.DS_Store
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
 .env
-*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.python-version
+*.db
+
+# Node / OpenSpec 开发工具
+node_modules/
+package-lock.json
+
+# 构建产物
 dist/
 build/
 release/
 *.spec
-.pytest_cache/
-.mypy_cache/
-*.db
-.python-version
+
+# macOS
+.DS_Store
+
+# 开发专用（不进入远端仓库）
+.cursor/
+openspec/
+package.json
+scripts/
