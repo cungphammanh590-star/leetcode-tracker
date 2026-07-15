@@ -20,7 +20,7 @@
 - [x] 3.2 在 leetcode.cn 网络层捕获提交与判题终态，解析出非空 `submission_id`、题目元数据、状态、运行指标与完整源代码
 - [x] 3.3 终态就绪后 `POST` 到本机 `http://127.0.0.1:8763/submit`
 - [x] 3.4 桥接不可达或 4xx 时给出最简可感知提示（popup 状态页 + badge/`console`，不自研完整 UI）
-- [ ] 3.5 在真实 leetcode.cn 提交一题（含非 Accepted 若方便），确认 3 秒内库中可见且不重复
+- [x] 3.5 在真实 leetcode.cn 提交一题（含非 Accepted 若方便），确认 3 秒内库中可见且不重复
 
 ## 4. 统计模块与 CLI
 
