@@ -153,6 +153,51 @@ def _shutdown_bridge(httpd: object | None) -> None:
         _log(f"bridge shutdown error: {exc}")
 
 
+def _patch_cocoa_menu_no_about() -> None:
+    """移除尚未配置元数据/签名的 About 菜单项。"""
+    try:
+        import AppKit
+        import webview.platforms.cocoa as cocoa
+    except ImportError:
+        return
+
+    def _add_app_menu(self, mainMenu, custom_items=None):
+        mainAppMenuItem = AppKit.NSMenuItem.alloc().init()
+        mainMenu.insertItem_atIndex_(mainAppMenuItem, 0)
+        appMenu = AppKit.NSMenu.alloc().init()
+        mainAppMenuItem.setSubmenu_(appMenu)
+
+        if custom_items:
+            self._process_menu_items(custom_items, appMenu)
+            appMenu.addItem_(AppKit.NSMenuItem.separatorItem())
+
+        appServicesMenu = AppKit.NSMenu.alloc().init()
+        cocoa.BrowserView.app.setServicesMenu_(appServicesMenu)
+        servicesMenuItem = appMenu.addItemWithTitle_action_keyEquivalent_(
+            self.localization["cocoa.menu.services"], nil, ""
+        )
+        servicesMenuItem.setSubmenu_(appServicesMenu)
+        appMenu.addItem_(AppKit.NSMenuItem.separatorItem())
+        appMenu.addItemWithTitle_action_keyEquivalent_(
+            self._append_app_name(self.localization["cocoa.menu.hide"]), "hide:", "h"
+        )
+        hideOthersMenuItem = appMenu.addItemWithTitle_action_keyEquivalent_(
+            self.localization["cocoa.menu.hideOthers"], "hideOtherApplications:", "h"
+        )
+        hideOthersMenuItem.setKeyEquivalentModifierMask_(
+            AppKit.NSAlternateKeyMask | AppKit.NSCommandKeyMask
+        )
+        appMenu.addItemWithTitle_action_keyEquivalent_(
+            self.localization["cocoa.menu.showAll"], "unhideAllApplications:", ""
+        )
+        appMenu.addItem_(AppKit.NSMenuItem.separatorItem())
+        appMenu.addItemWithTitle_action_keyEquivalent_(
+            self._append_app_name(self.localization["cocoa.menu.quit"]), "terminate:", "q"
+        )
+
+    cocoa.BrowserView._add_app_menu = _add_app_menu
+
+
 def run_app(host: Optional[str] = None, port: Optional[int] = None) -> int:
     os.environ.setdefault("PYWEBVIEW_GUI", "cocoa")
 
@@ -178,6 +223,7 @@ def run_app(host: Optional[str] = None, port: Optional[int] = None) -> int:
         return 0
 
     try:
+        _patch_cocoa_menu_no_about()
         webview.create_window("LeetCode Tracker", f"{base}/", width=980, height=760)
         webview.start()
     except Exception:
