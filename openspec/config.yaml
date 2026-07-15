@@ -5,9 +5,9 @@ context: |
   产品：完全本地的力扣刷题追踪助手（leetcode-tracker）。
   MVP 范围：自动采集提交 → SQLite → 基础统计 → 经 CLI 生成 Markdown 日报。
   技术栈：Chrome Manifest V3 扩展 + Python 本地 HTTP 桥接 + SQLite + Markdown 日报。
-  隐私：数据只存本机；无云端；除 leetcode.com 本身外产品不发起外部网络请求。
+  隐私：数据只存本机；无云端；除 leetcode.cn 本身外产品不发起外部网络请求。
   平台（MVP）：仅保证 macOS。Windows/Linux 为本 change 非目标。
-  站点（MVP）：仅保证 leetcode.com。leetcode.cn 为本 change 非目标。
+  站点（MVP）：仅保证 leetcode.cn。leetcode.com 为本 change 非目标。
   默认值（写死在 design；面向用户的配置子系统延后）：
     - 桥接服务：127.0.0.1:8763
     - 报告目录：~/leetcode-reports
@@ -19,7 +19,7 @@ context: |
     日报仅通过 `leetcode-tracker report --today` 生成；用户可按默认路径自行加 cron/launchd。
   扩展失败提示（MVP）：最简 badge/console/notification，不自研 UI。
   非目标（MVP）：云同步、Web UI、AI 分析、多用户账号、
-    app-config 能力、leetcode.cn、Windows/Linux 安装打磨。
+    app-config 能力、leetcode.com、Windows/Linux 安装打磨。
 
 # 各工件规则
 rules:

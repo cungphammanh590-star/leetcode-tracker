@@ -4,7 +4,7 @@
 
 ## What Changes
 
-- 新增 Chrome/Edge（MV3）扩展：在 leetcode.com 捕获提交与判题结果，并向本机桥接服务投递。
+- 新增 Chrome/Edge（MV3）扩展：在 leetcode.cn 捕获提交与判题结果，并向本机桥接服务投递。
 - 新增本机 Python HTTP 桥接服务（默认 `127.0.0.1:8763`）：接收投递、校验、写入 SQLite（含完整代码）。
 - 新增本地持久化：题目与提交记录 schema、以力扣 `submission_id` 唯一去重；缺失 id 则拒绝入库。
 - 新增基础统计查询：累计提交/通过率、难度分布、连续打卡、今日提交、最近提交列表。
@@ -15,14 +15,14 @@
 
 - 用户可配置能力（报告目录/时间/端口的配置 UI 或正式 config 子系统）——默认写死，后续独立 change。
 - `serve` 内调度器或启动时自动补跑日报。
-- leetcode.cn、Windows/Linux 安装与定时任务打磨。
+- leetcode.com、Windows/Linux 安装与定时任务打磨。
 - 云同步、Web 仪表盘、AI 分析、多用户账号。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `submission-capture`: 浏览器扩展捕获 leetcode.com 提交与判题结果，经本机桥接写入 SQLite；`submission_id` 必填且唯一去重；持久化完整代码与题目元数据。
+- `submission-capture`: 浏览器扩展捕获 leetcode.cn 提交与判题结果，经本机桥接写入 SQLite；`submission_id` 必填且唯一去重；持久化完整代码与题目元数据。
 - `progress-stats`: 基于本地库计算累计与今日指标、难度分布、连续打卡天数、最近提交列表；经 `leetcode-tracker stats` 可读。
 - `daily-report`: 通过 `leetcode-tracker report --today` 按日生成并落盘 Markdown 日报（默认路径与命名）；调度交由用户/cron，本系统不内置定时。
 
@@ -33,6 +33,6 @@
 ## Impact
 
 - **新增组件**：`extension/`（MV3）、Python 桥接与 CLI、SQLite 库文件、默认报告目录下的 Markdown。
-- **本机网络**：仅监听回环地址；除用户访问 leetcode.com 外，产品自身不发起外部请求。
+- **本机网络**：仅监听回环地址；除用户访问 leetcode.cn 外，产品自身不发起外部请求。
 - **依赖边界**：Python 侧尽量标准库；若引入第三方须在 design 明示并论证。
 - **后续预留**：`app-config`、跨站点/跨平台、进程内调度或 serve 补跑，均作为后续 change，不阻塞本 MVP 归档。

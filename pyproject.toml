@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leetcode-tracker"
+version = "0.1.0"
+description = "Fully local LeetCode practice tracker"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+leetcode-tracker = "leetcode_tracker.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["leetcode_tracker*"]

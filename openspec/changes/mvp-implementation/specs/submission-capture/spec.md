@@ -1,12 +1,12 @@
 ## ADDED Requirements
 
-### Requirement: 扩展可在 leetcode.com 捕获提交终态
+### Requirement: 扩展可在 leetcode.cn 捕获提交终态
 
-系统 SHALL 提供可在 Chrome/Edge（Manifest V3）加载的浏览器扩展；当用户在 leetcode.com 完成一次代码提交并产生最终判题结果时，扩展 MUST 捕获该次提交的标识、题目信息、判题状态及相关运行指标，并准备投递至本机桥接服务。
+系统 SHALL 提供可在 Chrome/Edge（Manifest V3）加载的浏览器扩展；当用户在 leetcode.cn 完成一次代码提交并产生最终判题结果时，扩展 MUST 捕获该次提交的标识、题目信息、判题状态及相关运行指标，并准备投递至本机桥接服务。
 
 #### Scenario: 成功捕获 Accepted 提交
 
-- **WHEN** 用户在 leetcode.com 提交代码且判题结果为 Accepted
+- **WHEN** 用户在 leetcode.cn 提交代码且判题结果为 Accepted
 - **THEN** 扩展 MUST 获得非空的 `submission_id`、题目标识与 Accepted 状态，并具备向本机桥接投递的完整载荷（含源代码）
 
 #### Scenario: 捕获非通过结果

@@ -1,6 +1,6 @@
 ## Context
 
-本项目为绿场 MVP：在 macOS 上验证「leetcode.com 提交自动入库 → 本地统计 → CLI 日报」闭环。用户是个人刷题者；数据与代码不得离开本机。提案已锁定三件套 capability（`submission-capture` / `progress-stats` / `daily-report`），配置子系统与进程内调度明确延后。
+本项目为绿场 MVP：在 macOS 上验证「leetcode.cn 提交自动入库 → 本地统计 → CLI 日报」闭环。用户是个人刷题者；数据与代码不得离开本机。提案已锁定三件套 capability（`submission-capture` / `progress-stats` / `daily-report`），配置子系统与进程内调度明确延后。
 
 约束摘要：仅回环监听、`submission_id` 强去重、存完整 code、日报只靠 `leetcode-tracker report --today`（可选系统定时）。
 
@@ -17,10 +17,17 @@
 
 - 用户可配置目录/端口/报告时间的正式子系统。
 - `serve` 内定时器或启动自动补跑日报。
-- leetcode.cn、Windows/Linux 一等支持。
+- leetcode.com、Windows/Linux 一等支持。
 - Web 仪表盘、云同步、AI 分析。
 
 ## Decisions
+
+### D10：软默认（开工时锁定）
+
+- `submitted_at`：以桥接收到时刻为准（服务端 SQLite `CURRENT_TIMESTAMP` / 本地时区查询）。
+- 日报「今日题目」：**每条提交一行**（同题多次提交多行）。
+- 题目主键：优先扩展抓到的 **题号（frontend id）+ slug** 做 upsert。
+- 重复 `submission_id`：HTTP **200** + `created: false`（幂等）。
 
 ### D1：仓库与进程形态
 
@@ -98,4 +105,4 @@
 
 ## Open Questions
 
-- （无阻塞项）扩展具体勾住 leetcode.com 哪几个 URL/响应字段，实现 Phase 时对照网络面板敲定，不阻断本设计归档。
+- （无阻塞项）扩展具体勾住 leetcode.cn 哪几个 URL/响应字段，实现 Phase 时对照网络面板敲定，不阻断本设计归档。
