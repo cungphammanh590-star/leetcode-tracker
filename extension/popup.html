@@ -12,10 +12,7 @@
         color: #1a1a1a;
         background: #f7f7f5;
       }
-      h1 {
-        font-size: 14px;
-        margin: 0 0 8px;
-      }
+      h1 { font-size: 14px; margin: 0 0 8px; }
       .row {
         display: flex;
         justify-content: space-between;
@@ -33,7 +30,7 @@
         border: 0;
         border-radius: 6px;
         padding: 8px;
-        background: #1f6feb;
+        background: #0f766e;
         color: #fff;
         font-size: 12px;
         cursor: pointer;
@@ -43,19 +40,12 @@
   </head>
   <body>
     <h1>LeetCode Tracker</h1>
-    <div class="row">
-      <span>本机桥接</span>
-      <span id="bridge">检测中…</span>
-    </div>
-    <div class="row">
-      <span>库内提交数</span>
-      <span id="count">—</span>
-    </div>
+    <div class="row"><span>本机桥接</span><span id="bridge">检测中…</span></div>
+    <div class="row"><span>库内提交数</span><span id="count">—</span></div>
     <div id="last" class="muted">最近一次：尚无记录</div>
-    <div id="debug" class="muted">调试：尚无</div>
     <p class="muted">
-      采集依赖题目页网络钩子。请<strong>移除并重新加载</strong>扩展后，先打开题目页再提交。
-      调试应先后出现 <code>hooks ready</code> / <code>net</code> / <code>remember submit</code>。
+      仅支持 <code>leetcode.cn</code>。请先
+      <code>leetcode-tracker serve</code> 或 <code>app</code>，再在题目页提交。
     </p>
     <button id="refresh" type="button">重新检测</button>
     <script src="popup.js"></script>

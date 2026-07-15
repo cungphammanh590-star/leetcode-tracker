@@ -1,73 +1,53 @@
 # leetcode-tracker
 
-完全本地的力扣刷题追踪助手（macOS MVP）。
+完全本地的 **leetcode.cn** 刷题追踪助手（v0.1.1）。
 
-浏览器扩展在 [leetcode.cn](https://leetcode.cn) 捕获提交 → 本机桥接写入 SQLite → CLI 查统计 / 生成 Markdown 日报。数据不出本机。
+浏览器扩展捕获提交 → 本机桥接写入 SQLite → CLI / 日报 / **桌面仪表盘（pywebview）**。数据不出本机。
 
-## 快速开始（约 5 步）
-
-1. **安装 CLI**（建议用项目虚拟环境）
+## 安装
 
 ```bash
 cd leetcode-tracker
-python3 -m venv .venv
-source .venv/bin/activate
 pip install -e .
+# 桌面窗口可选依赖
+pip install -e '.[app]'
 ```
 
-2. **启动桥接服务**（保持该终端运行）
-
-```bash
-leetcode-tracker serve
-```
-
-默认监听 `http://127.0.0.1:8763`。数据库文件：`~/.local/share/leetcode-tracker/leetcode.db`。
-
-3. **加载浏览器扩展（Chrome / Edge）**
-
-- 打开 `chrome://extensions`（或 Edge 对应页面）
-- 开启「开发者模式」
-- 「加载已解压的扩展程序」→ 选择本仓库的 `extension/` 目录
-
-4. **在 leetcode.cn 正常刷题提交**
-
-标题栏扩展图标会出现简短 badge（`ok` / `dup` / `!`）。若为 `!`，请确认步骤 2 的服务已启动。
-
-5. **查看统计 / 生成今日日报**
-
-```bash
-leetcode-tracker stats
-leetcode-tracker report --today
-```
-
-日报默认写入：`~/leetcode-reports/YYYY-MM-DD.md`。
-
-## 可选：每天自动出日报（需自行配置）
-
-产品**不会**自动注册定时任务，也**不会**在 `serve` 里到点生成报告。若需要，可用 macOS `cron` 或 `launchd` 自行调用 CLI。
-
-示例（每天 23:00，路径按你的安装位置修改）：
-
-```cron
-0 23 * * * /Users/你的用户名/Projects/leetcode-tracker/.venv/bin/leetcode-tracker report --today
-```
-
-## CLI
+## 常用命令
 
 | 命令 | 说明 |
 |------|------|
-| `leetcode-tracker serve` | 启动本机桥接 |
-| `leetcode-tracker stats` | 打印累计 / 今日 / 连续打卡等 |
-| `leetcode-tracker report --today` | 生成或覆盖今日 Markdown 日报 |
+| `leetcode-tracker serve` | 启动桥接 + 仪表盘（默认 `http://127.0.0.1:8763/`） |
+| `leetcode-tracker app` | pywebview 桌面窗口打开仪表盘（必要时自动拉起服务） |
+| `leetcode-tracker stats` | 终端统计（含错题与近 7 日） |
+| `leetcode-tracker report --today` | 生成今日 Markdown 日报 |
+| `leetcode-tracker config show` | 查看配置 |
+| `leetcode-tracker config set port 8763` | 修改配置项 |
+| `leetcode-tracker autostart install` | macOS 登录自启 `serve` |
+| `leetcode-tracker autostart uninstall` | 取消自启 |
 
-## 范围与限制（MVP）
+配置文件：`~/.config/leetcode-tracker/config.json`  
+（`host` / `port` / `report_dir` / `report_time` / `autostart`；**库路径不可配**）
+
+数据库：`~/.local/share/leetcode-tracker/leetcode.db`  
+日报默认：`~/leetcode-reports/YYYY-MM-DD.md`
+
+## 快速使用
+
+1. `pip install -e '.[app]'`
+2. `leetcode-tracker app`（或 `serve` + 浏览器打开仪表盘）
+3. Chrome 开发者模式加载 `extension/`
+4. 在 **leetcode.cn** 题目页提交
+5. 需要时：`leetcode-tracker report --today`；可选 `autostart install`
+
+## 说明与限制
 
 - 仅保证 **macOS** + **leetcode.cn**
-- 去重键为力扣 `submission_id`（缺失则拒绝入库）
-- 保存完整提交源码到本地库
-- 无云同步、无 Web UI、无正式配置子系统（目录/端口写死）
-- 扩展对力扣改版敏感；若抓不到字段，请开 issue 或对照 Network 面板排查
+- 自启只负责 `serve`；桌面窗口需自行打开 `app` 或浏览器
+- 换 conda/venv 后请重新 `autostart install`
+- **本版本不对接大模型 API**（日报 Markdown 可留给下版本总结）
+- 无云同步、无账号系统
 
-## 开发说明
+## 规格
 
-规格与任务见 `openspec/changes/mvp-implementation/`。
+见 `openspec/changes/mvp-1-01/` 与 `openspec/specs/`。

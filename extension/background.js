@@ -1,15 +1,12 @@
-const BRIDGE_URL = "http://127.0.0.1:8763/submit";
-const HEALTH_URL = "http://127.0.0.1:8763/health";
+async function getBridgeBase() {
+  // Prefer common default; future: sync from storage if needed.
+  return "http://127.0.0.1:8763";
+}
 
 async function setBadge(text, color) {
   try {
     await chrome.action.setBadgeText({ text: text || "" });
-    if (color) {
-      await chrome.action.setBadgeBackgroundColor({ color });
-    }
-    await chrome.action.setTitle({
-      title: text ? `LeetCode Tracker: ${text}` : "LeetCode Tracker",
-    });
+    if (color) await chrome.action.setBadgeBackgroundColor({ color });
   } catch {
     // ignore
   }
@@ -20,25 +17,30 @@ async function clearBadgeLater() {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "clear-badge") {
-    setBadge("", "#000000");
-  }
+  if (alarm.name === "clear-badge") setBadge("", "#000000");
 });
 
 async function remember(event) {
-  await chrome.storage.local.set({
-    lastEvent: { ...event, at: Date.now() },
-  });
+  await chrome.storage.local.set({ lastEvent: { ...event, at: Date.now() } });
 }
 
-async function rememberDebug(message, extra) {
-  await chrome.storage.local.set({
-    lastDebug: { message, extra: extra || null, at: Date.now() },
-  });
+async function notify(title, message) {
+  try {
+    await chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title,
+      message,
+      priority: 1,
+    });
+  } catch (err) {
+    console.warn("[leetcode-tracker] notification failed", err);
+  }
 }
 
 async function postSubmission(payload) {
-  const response = await fetch(BRIDGE_URL, {
+  const base = await getBridgeBase();
+  const response = await fetch(`${base}/submit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -59,48 +61,34 @@ async function postSubmission(payload) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message) return;
-
-  if (message.type === "debug") {
-    console.info("[leetcode-tracker:debug]", message.message, message.extra || "");
-    rememberDebug(message.message, message.extra);
-    return;
-  }
-
-  if (message.type !== "submission") {
-    return;
-  }
+  if (!message || message.type !== "submission") return;
 
   const payload = message.payload;
-  console.log("[leetcode-tracker] captured submission", payload);
-
   postSubmission(payload)
     .then(async (data) => {
-      console.log("[leetcode-tracker] saved", data);
       await setBadge(data?.created === false ? "dup" : "ok", "#0a7");
       clearBadgeLater();
-      await remember({
-        ok: true,
-        summary: `${payload.problem_id}. ${payload.title} (${payload.status})`,
-        data,
-      });
+      const summary = `${payload.problem_id}. ${payload.title} (${payload.status})`;
+      await remember({ ok: true, summary, data });
+      await notify(
+        data?.created === false ? "已存在该提交" : "提交已记录",
+        summary
+      );
       sendResponse({ ok: true, data });
     })
     .catch(async (err) => {
-      console.error("[leetcode-tracker] bridge error", err);
       await setBadge("!", "#c00");
-      await chrome.action.setTitle({
-        title: `投递失败：${err.message || err}。请先运行 leetcode-tracker serve`,
-      });
       await remember({
         ok: false,
         error: String(err.message || err),
         summary: payload?.title || "",
       });
+      await notify(
+        "投递失败",
+        `${err.message || err}。请先运行 leetcode-tracker serve 或 app`
+      );
       sendResponse({ ok: false, error: String(err.message || err) });
     });
 
   return true;
 });
-
-fetch(HEALTH_URL).catch(() => {});

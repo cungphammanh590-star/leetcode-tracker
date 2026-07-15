@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LeetCode Tracker</title>
+  <style>
+    :root {
+      --bg: #f4f1eb;
+      --ink: #1c1917;
+      --muted: #78716c;
+      --card: #fffcf7;
+      --line: #e7e5e4;
+      --ok: #15803d;
+      --accent: #0f766e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Noto Sans SC", system-ui, sans-serif;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #d9f3ef 0%, transparent 55%),
+        radial-gradient(900px 400px at 100% 0%, #fde68a55 0%, transparent 50%),
+        var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    header {
+      padding: 28px 24px 8px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+    }
+    .sub { color: var(--muted); margin-top: 6px; font-size: 14px; }
+    main { max-width: 960px; margin: 0 auto; padding: 12px 24px 40px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0 20px;
+    }
+    .metric {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px 16px;
+    }
+    .metric .label { font-size: 12px; color: var(--muted); }
+    .metric .value { font-size: 24px; font-weight: 650; margin-top: 6px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+    }
+    h2 { margin: 0 0 10px; font-size: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 500; }
+    .ok { color: var(--ok); }
+    .bars { display: flex; gap: 8px; align-items: flex-end; height: 90px; }
+    .bar {
+      flex: 1;
+      background: #99f6e4;
+      border-radius: 8px 8px 2px 2px;
+      min-height: 4px;
+      position: relative;
+    }
+    .bar span {
+      position: absolute;
+      bottom: -18px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    #status { font-size: 12px; color: var(--muted); }
+    @media (max-width: 800px) {
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LeetCode Tracker</h1>
+    <div class="sub">仅 leetcode.cn · 数据仅存本机 · <span id="status">加载中…</span></div>
+  </header>
+  <main>
+    <div class="grid">
+      <div class="metric"><div class="label">今日提交</div><div class="value" id="today_sub">—</div></div>
+      <div class="metric"><div class="label">今日通过</div><div class="value" id="today_ac">—</div></div>
+      <div class="metric"><div class="label">连续打卡</div><div class="value" id="streak">—</div></div>
+      <div class="metric"><div class="label">累计通过率</div><div class="value" id="rate">—</div></div>
+    </div>
+
+    <section>
+      <h2>近 7 日</h2>
+      <div class="bars" id="bars"></div>
+    </section>
+
+    <section>
+      <h2>今日错题</h2>
+      <table>
+        <thead><tr><th>题目</th><th>难度</th><th>状态</th></tr></thead>
+        <tbody id="wrong"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>最近提交</h2>
+      <table>
+        <thead><tr><th>时间</th><th>题目</th><th>状态</th></tr></thead>
+        <tbody id="recent"></tbody>
+      </table>
+    </section>
+  </main>
+  <script>
+    async function refresh() {
+      try {
+        const res = await fetch("/api/stats");
+        const data = await res.json();
+        document.getElementById("today_sub").textContent = data.today_submissions;
+        document.getElementById("today_ac").textContent =
+          data.today_accepted + " (" + data.today_acceptance_rate + "%)";
+        document.getElementById("streak").textContent = data.streak_days + " 天";
+        document.getElementById("rate").textContent =
+          data.accepted_count + "/" + data.total_submissions + " (" + data.acceptance_rate + "%)";
+        document.getElementById("status").textContent =
+          "已更新 " + new Date().toLocaleTimeString();
+
+        const max = Math.max(1, ...data.last7.map((d) => d.submissions));
+        document.getElementById("bars").innerHTML = data.last7
+          .map((d) => {
+            const h = Math.max(4, Math.round((d.submissions / max) * 80));
+            const label = d.date.slice(5);
+            return '<div class="bar" style="height:' + h + 'px"><span>' + label + "</span></div>";
+          })
+          .join("");
+
+        const wrong = document.getElementById("wrong");
+        if (!data.today_wrong.length) {
+          wrong.innerHTML = '<tr><td colspan="3">今日无错题</td></tr>';
+        } else {
+          wrong.innerHTML = data.today_wrong
+            .map(
+              (i) =>
+                "<tr><td>" +
+                i.problem_id +
+                ". " +
+                i.title +
+                "</td><td>" +
+                (i.difficulty || "-") +
+                "</td><td>" +
+                i.status +
+                "</td></tr>"
+            )
+            .join("");
+        }
+
+        const recent = document.getElementById("recent");
+        recent.innerHTML = (data.recent || [])
+          .map((i) => {
+            const cls = i.status === "Accepted" ? "ok" : "";
+            return (
+              "<tr><td>" +
+              i.submitted_at +
+              "</td><td>" +
+              i.problem_id +
+              ". " +
+              i.title +
+              '</td><td class="' +
+              cls +
+              '">' +
+              i.status +
+              "</td></tr>"
+            );
+          })
+          .join("");
+      } catch (err) {
+        document.getElementById("status").textContent = "无法读取统计：" + err;
+      }
+    }
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>

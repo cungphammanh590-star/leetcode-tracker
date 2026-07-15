@@ -2,11 +2,11 @@
   "manifest_version": 3,
   "name": "LeetCode Tracker",
   "version": "0.1.3",
-  "description": "Capture leetcode.cn submissions and send them to the local leetcode-tracker bridge.",
-  "permissions": ["storage", "alarms", "scripting", "tabs"],
+  "description": "将 leetcode.cn 提交同步到本机 LeetCode Tracker。",
+  "permissions": ["storage", "alarms", "notifications"],
   "host_permissions": [
     "https://leetcode.cn/*",
-    "http://127.0.0.1:8763/*"
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js"

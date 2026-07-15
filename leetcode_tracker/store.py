@@ -159,15 +159,20 @@ def save_submission(conn: sqlite3.Connection, payload: dict[str, Any]) -> SaveRe
         tags=payload.get("tags"),
     )
 
-    conn.execute(
-        """
-        INSERT INTO submissions (
-            submission_id, problem_id, status, code, runtime_ms, memory_mb, language
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (submission_id, problem_id, status, code, runtime_ms, memory_mb, language),
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            """
+            INSERT INTO submissions (
+                submission_id, problem_id, status, code, runtime_ms, memory_mb, language
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (submission_id, problem_id, status, code, runtime_ms, memory_mb, language),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        # 并发重复投递：扩展/轮询可能几乎同时 POST 同一 submission_id
+        return SaveResult(created=False, submission_id=submission_id)
     return SaveResult(created=True, submission_id=submission_id)
 
 

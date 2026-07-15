@@ -257,6 +257,7 @@
       code: check.code || null,
       language: null,
       meta: extractProblemMeta(),
+      createdAt: Date.now(),
     };
 
     const status = statusFromCheck(check);

@@ -1,9 +1,9 @@
-"""统计查询（供 stats 与 report 复用）。"""
+"""统计查询（供 stats、report、仪表盘复用）。"""
 
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
@@ -22,6 +22,8 @@ class OverviewStats:
     streak_days: int
     recent: list[dict[str, Any]]
     today_items: list[dict[str, Any]]
+    today_wrong: list[dict[str, Any]] = field(default_factory=list)
+    last7: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _rate(accepted: int, total: int) -> float:
@@ -67,6 +69,57 @@ def _row_to_item(row: sqlite3.Row) -> dict[str, Any]:
         "language": row["language"],
         "submitted_at": row["submitted_at"],
     }
+
+
+def get_today_wrong(conn: sqlite3.Connection, today: Optional[date] = None) -> list[dict[str, Any]]:
+    today = today or _local_today()
+    rows = conn.execute(
+        """
+        SELECT s.submission_id, s.problem_id, p.title, p.slug, p.difficulty,
+               s.status, s.runtime_ms, s.memory_mb, s.language, s.submitted_at
+        FROM submissions s
+        JOIN problems p ON p.problem_id = s.problem_id
+        WHERE date(s.submitted_at, 'localtime') = ?
+          AND s.status != 'Accepted'
+        ORDER BY s.submitted_at DESC, s.id DESC
+        """,
+        (today.isoformat(),),
+    ).fetchall()
+    return [_row_to_item(r) for r in rows]
+
+
+def get_last7_days(conn: sqlite3.Connection, today: Optional[date] = None) -> list[dict[str, Any]]:
+    today = today or _local_today()
+    result: list[dict[str, Any]] = []
+    for i in range(6, -1, -1):
+        day = today - timedelta(days=i)
+        day_str = day.isoformat()
+        total = int(
+            conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM submissions
+                WHERE date(submitted_at, 'localtime') = ?
+                """,
+                (day_str,),
+            ).fetchone()["c"]
+        )
+        accepted = int(
+            conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM submissions
+                WHERE date(submitted_at, 'localtime') = ? AND status = 'Accepted'
+                """,
+                (day_str,),
+            ).fetchone()["c"]
+        )
+        result.append(
+            {
+                "date": day_str,
+                "submissions": total,
+                "accepted": accepted,
+            }
+        )
+    return result
 
 
 def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> OverviewStats:
@@ -149,7 +202,13 @@ def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> Overvie
         streak_days=compute_streak(conn, today),
         recent=[_row_to_item(r) for r in recent_rows],
         today_items=[_row_to_item(r) for r in today_rows],
+        today_wrong=get_today_wrong(conn, today),
+        last7=get_last7_days(conn, today),
     )
+
+
+def overview_to_dict(stats: OverviewStats) -> dict[str, Any]:
+    return asdict(stats)
 
 
 def format_stats_text(stats: OverviewStats) -> str:
@@ -158,13 +217,27 @@ def format_stats_text(stats: OverviewStats) -> str:
         "============",
         f"今日提交: {stats.today_submissions}",
         f"今日通过: {stats.today_accepted} ({stats.today_acceptance_rate}%)",
+        f"今日错题: {len(stats.today_wrong)}",
         f"累计提交: {stats.total_submissions}",
         f"累计通过: {stats.accepted_count} ({stats.acceptance_rate}%)",
         f"难度通过(去重): Easy {stats.easy_solved} / Medium {stats.medium_solved} / Hard {stats.hard_solved}",
         f"连续打卡: {stats.streak_days} 天",
         "",
-        f"最近 {len(stats.recent)} 条提交:",
+        "近 7 日:",
     ]
+    for day in stats.last7:
+        lines.append(
+            f"  {day['date']}: 提交 {day['submissions']} / 通过 {day['accepted']}"
+        )
+    if stats.today_wrong:
+        lines.append("")
+        lines.append("今日错题:")
+        for item in stats.today_wrong:
+            lines.append(
+                f"  {item['problem_id']}. {item['title']} | {item['status']}"
+            )
+    lines.append("")
+    lines.append(f"最近 {len(stats.recent)} 条提交:")
     for item in stats.recent:
         runtime = f"{item['runtime_ms']}ms" if item["runtime_ms"] is not None else "-"
         lines.append(

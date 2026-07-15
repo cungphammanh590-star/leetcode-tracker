@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from leetcode_tracker.config import load_config
 from leetcode_tracker.db import init_db
-from leetcode_tracker.paths import ensure_dir, report_dir
+from leetcode_tracker.paths import ensure_dir
 from leetcode_tracker.stats import OverviewStats, get_overview
 
 
@@ -25,6 +26,7 @@ def render_daily_markdown(stats: OverviewStats, day: str) -> str:
         f"| 今日提交 | {stats.today_submissions} 次 |",
         f"| 今日通过 | {stats.today_accepted} 次 |",
         f"| 今日通过率 | {stats.today_acceptance_rate}% |",
+        f"| 今日错题 | {len(stats.today_wrong)} 次 |",
         f"| 累计提交 | {stats.total_submissions} 次 |",
         f"| 累计通过 | {stats.accepted_count} 次 |",
         f"| 累计通过率 | {stats.acceptance_rate}% |",
@@ -48,9 +50,41 @@ def render_daily_markdown(stats: OverviewStats, day: str) -> str:
     lines.extend(
         [
             "",
+            "## 今日错题",
+            "",
+            "| 题目 | 难度 | 状态 |",
+            "|------|------|------|",
+        ]
+    )
+    if not stats.today_wrong:
+        lines.append("| （无） | - | - |")
+    else:
+        for item in stats.today_wrong:
+            title = f"{item['problem_id']}. {item['title']}"
+            lines.append(
+                f"| {title} | {item['difficulty'] or '-'} | {item['status']} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## 近 7 日对比",
+            "",
+            "| 日期 | 提交 | 通过 |",
+            "|------|------|------|",
+        ]
+    )
+    for day_row in stats.last7:
+        lines.append(
+            f"| {day_row['date']} | {day_row['submissions']} | {day_row['accepted']} |"
+        )
+
+    lines.extend(
+        [
+            "",
             "## 继续保持",
             "",
-            f"连续打卡 {stats.streak_days} 天。用 `leetcode-tracker stats` 可随时查看累计进度。",
+            f"连续打卡 {stats.streak_days} 天。可用 `leetcode-tracker stats` 或桌面仪表盘查看进度。",
             "",
         ]
     )
@@ -59,9 +93,10 @@ def render_daily_markdown(stats: OverviewStats, day: str) -> str:
 
 def write_today_report(output_dir: Path | None = None) -> Path:
     day = datetime.now().astimezone().date().isoformat()
-    target_dir = output_dir or report_dir()
-    ensure_dir(target_dir)
-    path = target_dir / f"{day}.md"
+    if output_dir is None:
+        output_dir = Path(load_config()["report_dir"])
+    ensure_dir(output_dir)
+    path = output_dir / f"{day}.md"
 
     conn = init_db()
     try:
