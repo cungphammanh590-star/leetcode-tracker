@@ -1,0 +1,40 @@
+schema: spec-driven
+
+# 项目上下文（创建工件时展示给 AI）
+context: |
+  产品：完全本地的力扣刷题追踪助手（leetcode-tracker）。
+  MVP 范围：自动采集提交 → SQLite → 基础统计 → 经 CLI 生成 Markdown 日报。
+  技术栈：Chrome Manifest V3 扩展 + Python 本地 HTTP 桥接 + SQLite + Markdown 日报。
+  隐私：数据只存本机；无云端；除 leetcode.com 本身外产品不发起外部网络请求。
+  平台（MVP）：仅保证 macOS。Windows/Linux 为本 change 非目标。
+  站点（MVP）：仅保证 leetcode.com。leetcode.cn 为本 change 非目标。
+  默认值（写死在 design；面向用户的配置子系统延后）：
+    - 桥接服务：127.0.0.1:8763
+    - 报告目录：~/leetcode-reports
+    - 报告时间（仅文档/cron 示例）：23:00
+  去重：力扣 submission_id 必填且 UNIQUE；缺失则拒绝入库。
+  存储：本地持久化完整提交源代码。
+  CLI：安装后命令名为 `leetcode-tracker`（子命令 serve / stats / report），不依赖 python -m。
+  调度：无进程内日报调度，无 serve 启动补跑。
+    日报仅通过 `leetcode-tracker report --today` 生成；用户可按默认路径自行加 cron/launchd。
+  扩展失败提示（MVP）：最简 badge/console/notification，不自研 UI。
+  非目标（MVP）：云同步、Web UI、AI 分析、多用户账号、
+    app-config 能力、leetcode.cn、Windows/Linux 安装打磨。
+
+# 各工件规则
+rules:
+  proposal:
+    - 提案控制在约 2 页内；聚焦 why 与 capability 边界
+    - 必须显式写出 Non-goals（可放在 What Changes 或 Impact 下）
+  specs:
+    - 需求使用 SHALL/MUST；每条需求至少有一个 #### Scenario
+    - 优先描述行为，避免把表结构/API 字段清单写进 spec（那些放 design）
+    - 需求名与场景描述使用中文
+  design:
+    - MVP 默认值硬编码；不要发明用户配置子系统
+    - cron/launchd 仅作为可选示例写入文档
+    - 设计文档使用中文
+  tasks:
+    - 按依赖排序：持久化 → 桥接 → 扩展 → 统计 → 日报 CLI
+    - 单任务量控制在一次会话可完成
+    - 任务描述使用中文
