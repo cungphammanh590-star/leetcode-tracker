@@ -25,6 +25,7 @@ release/
 
 # 开发专用（不进入远端仓库）
 .cursor/
+.githooks/
 openspec/
 package.json
 scripts/
