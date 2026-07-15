@@ -24,9 +24,48 @@
     debug("fetch already patched; listening");
   }
 
-  const pending = new Map();
+  const PENDING_TTL_MS = 10 * 60 * 1000; // 未完成提交暂存
+  const EMITTED_TTL_MS = 10 * 60 * 1000; // 已上报 id，挡住重复 check
+  const CLEAN_EVERY_MS = 60 * 1000;
+
+  const pending = new Map(); // submission_id -> { ..., createdAt }
+  const emitted = new Map(); // submission_id -> emittedAt
+
+  function pruneMaps(now) {
+    now = now || Date.now();
+    for (const [key, item] of pending) {
+      const createdAt = item && item.createdAt != null ? item.createdAt : 0;
+      if (now - createdAt > PENDING_TTL_MS) pending.delete(key);
+    }
+    for (const [key, at] of emitted) {
+      if (now - at > EMITTED_TTL_MS) emitted.delete(key);
+    }
+  }
+
+  function wasEmitted(submissionId) {
+    pruneMaps();
+    const key = String(submissionId);
+    const at = emitted.get(key);
+    if (at == null) return false;
+    if (Date.now() - at > EMITTED_TTL_MS) {
+      emitted.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  function markEmitted(submissionId) {
+    emitted.set(String(submissionId), Date.now());
+  }
 
   function emit(payload) {
+    const sid = payload && payload.submission_id;
+    if (!sid) return;
+    if (wasEmitted(sid)) {
+      debug("skip duplicate emit (sliding window)", { submission_id: sid });
+      return;
+    }
+    markEmitted(sid);
     debug("emit submission", {
       submission_id: payload.submission_id,
       problem_id: payload.problem_id,
@@ -249,6 +288,12 @@
     const key = String(submissionId);
     if (!isFinishedCheck(check)) {
       debug("check pending", { submissionId: key, state: check.state });
+      return;
+    }
+
+    if (wasEmitted(key)) {
+      pending.delete(key);
+      debug("skip finalize, already emitted", { submissionId: key });
       return;
     }
 
@@ -475,5 +520,9 @@
   }
 
   window.__leetcodeTrackerInjected = true;
+  if (!window.__leetcodeTrackerCleanerStarted) {
+    window.__leetcodeTrackerCleanerStarted = true;
+    setInterval(pruneMaps, CLEAN_EVERY_MS);
+  }
   debug("hooks ready @ document_start", { href: String(location.href) });
 })();
