@@ -28,3 +28,4 @@ release/
 openspec/
 package.json
 scripts/
+.build-venv/
