@@ -14,6 +14,14 @@ from urllib.parse import urlparse
 
 from leetcode_tracker.config import load_config
 from leetcode_tracker.db import init_db
+from leetcode_tracker.problem_stats import (
+    ensure_stats_materialized,
+    get_daily_stats_rows,
+    get_llm_context,
+    get_problem_stats_row,
+    get_problem_submissions,
+    list_problem_stats,
+)
 from leetcode_tracker.stats import get_overview, overview_to_dict
 from leetcode_tracker.store import StoreError, count_submissions, save_submission
 
@@ -21,16 +29,16 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8763
 
 
-def _dashboard_html() -> bytes:
+def _static_html(filename: str) -> bytes:
     candidates: list[Path] = []
-    # PyInstaller / frozen app
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        candidates.append(Path(meipass) / "leetcode_tracker" / "static" / "index.html")
-        candidates.append(Path(meipass) / "static" / "index.html")
-    # beside executable (onedir .app Resources)
-    candidates.append(Path(sys.executable).resolve().parent / "leetcode_tracker" / "static" / "index.html")
-    candidates.append(Path(__file__).with_name("static") / "index.html")
+        candidates.append(Path(meipass) / "leetcode_tracker" / "static" / filename)
+        candidates.append(Path(meipass) / "static" / filename)
+    candidates.append(
+        Path(sys.executable).resolve().parent / "leetcode_tracker" / "static" / filename
+    )
+    candidates.append(Path(__file__).with_name("static") / filename)
 
     for path in candidates:
         try:
@@ -39,13 +47,17 @@ def _dashboard_html() -> bytes:
         except OSError:
             continue
     try:
-        return resources.files("leetcode_tracker").joinpath("static/index.html").read_bytes()
+        return resources.files("leetcode_tracker").joinpath(f"static/{filename}").read_bytes()
     except Exception as exc:  # noqa: BLE001
-        raise FileNotFoundError("dashboard index.html not found") from exc
+        raise FileNotFoundError(f"static file not found: {filename}") from exc
+
+
+def _dashboard_html() -> bytes:
+    return _static_html("index.html")
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
-    server_version = "LeetcodeTrackerBridge/0.1.1"
+    server_version = "LeetcodeTrackerBridge/0.2.0"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"[bridge] {self.address_string()} - {fmt % args}")
@@ -86,6 +98,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if path == "/api/stats":
             self._handle_stats()
             return
+        if path == "/api/problems":
+            self._handle_problem_list()
+            return
+        if path.startswith("/api/problems/"):
+            self._handle_problem_api(path)
+            return
+        if path.startswith("/problems/"):
+            self._send_bytes(200, _static_html("problem.html"), "text/html; charset=utf-8")
+            return
         self._send_json(404, {"status": "error", "message": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -124,6 +145,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
         try:
             conn = init_db()
             try:
+                ensure_stats_materialized(conn)
                 stats = get_overview(conn)
             finally:
                 conn.close()
@@ -131,6 +153,58 @@ class BridgeHandler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             self._send_json(500, {"status": "error", "message": str(exc)})
+
+    def _handle_problem_list(self) -> None:
+        try:
+            conn = init_db()
+            try:
+                ensure_stats_materialized(conn)
+                items = list_problem_stats(conn)
+            finally:
+                conn.close()
+            self._send_json(200, {"problems": items})
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            self._send_json(500, {"status": "error", "message": str(exc)})
+
+    def _handle_problem_api(self, path: str) -> None:
+        parts = [p for p in path.split("/") if p]
+        # /api/problems/{id}/stats | /api/problems/{id}/llm-context
+        if len(parts) < 4 or parts[0] != "api" or parts[1] != "problems":
+            self._send_json(404, {"status": "error", "message": "not found"})
+            return
+        try:
+            problem_id = int(parts[2])
+        except ValueError:
+            self._send_json(400, {"status": "error", "message": "invalid problem id"})
+            return
+        action = parts[3]
+        try:
+            conn = init_db()
+            try:
+                ensure_stats_materialized(conn)
+                if action == "stats":
+                    row = get_problem_stats_row(conn, problem_id)
+                    if row is None:
+                        self._send_json(404, {"status": "error", "message": "not found"})
+                        return
+                    daily = get_daily_stats_rows(conn, problem_id, limit=90)
+                    submissions = get_problem_submissions(conn, problem_id, limit=80)
+                    self._send_json(
+                        200,
+                        {"problem": row, "daily": daily, "submissions": submissions},
+                    )
+                    return
+                if action == "llm-context":
+                    text = get_llm_context(conn, problem_id)
+                    self._send_json(200, {"problem_id": problem_id, "markdown": text})
+                    return
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            self._send_json(500, {"status": "error", "message": str(exc)})
+        self._send_json(404, {"status": "error", "message": "not found"})
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or "0")
@@ -199,7 +273,8 @@ def run_server(host: Optional[str] = None, port: Optional[int] = None) -> None:
     httpd = create_server(host=host, port=port)
     host, port = httpd.server_address[:2]
     print(f"leetcode-tracker bridge listening on http://{host}:{port}")
-    print("Endpoints: GET /  GET /api/stats  GET /health  POST /submit")
+    print("Endpoints: GET /  GET /problems/{id}  GET /api/stats")
+    print("           GET /api/problems/{id}/llm-context  GET /health  POST /submit")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

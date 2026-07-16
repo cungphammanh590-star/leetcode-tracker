@@ -8,7 +8,7 @@ from pathlib import Path
 from leetcode_tracker.config import load_config
 from leetcode_tracker.db import init_db
 from leetcode_tracker.paths import ensure_dir
-from leetcode_tracker.stats import OverviewStats, get_overview
+from leetcode_tracker.stats import OverviewStats, format_status_counts, get_overview
 
 
 def _status_mark(status: str) -> str:
@@ -26,7 +26,7 @@ def render_daily_markdown(stats: OverviewStats, day: str) -> str:
         f"| 今日提交 | {stats.today_submissions} 次 |",
         f"| 今日通过 | {stats.today_accepted} 次 |",
         f"| 今日通过率 | {stats.today_acceptance_rate}% |",
-        f"| 今日错题 | {len(stats.today_wrong)} 次 |",
+        f"| 今日错题 | {sum(item['total'] for item in stats.today_wrong)} 次 |",
         f"| 累计提交 | {stats.total_submissions} 次 |",
         f"| 累计通过 | {stats.accepted_count} 次 |",
         f"| 累计通过率 | {stats.acceptance_rate}% |",
@@ -52,8 +52,8 @@ def render_daily_markdown(stats: OverviewStats, day: str) -> str:
             "",
             "## 今日错题",
             "",
-            "| 题目 | 难度 | 状态 |",
-            "|------|------|------|",
+            "| 题目 | 难度 | 错误汇总 |",
+            "|------|------|----------|",
         ]
     )
     if not stats.today_wrong:
@@ -62,7 +62,8 @@ def render_daily_markdown(stats: OverviewStats, day: str) -> str:
         for item in stats.today_wrong:
             title = f"{item['problem_id']}. {item['title']}"
             lines.append(
-                f"| {title} | {item['difficulty'] or '-'} | {item['status']} |"
+                f"| {title} | {item['difficulty'] or '-'} | "
+                f"{format_status_counts(item['status_counts'])} |"
             )
 
     lines.extend(

@@ -30,6 +30,9 @@
 
   const pending = new Map(); // submission_id -> { ..., createdAt }
   const emitted = new Map(); // submission_id -> emittedAt
+  const problemMetaCache = new Map(); // slug -> { problem_id, title, slug, difficulty, tags }
+  const problemMetaCacheById = new Map(); // problem_id -> meta
+  const difficultyFetchCache = new Map(); // slug -> Promise<meta|null>
 
   function pruneMaps(now) {
     now = now || Date.now();
@@ -70,6 +73,7 @@
       submission_id: payload.submission_id,
       problem_id: payload.problem_id,
       status: payload.status,
+      difficulty: payload.difficulty,
     });
     window.postMessage(
       { source: "leetcode-tracker", type: "submission", payload },
@@ -85,8 +89,135 @@
     }
   }
 
+  function mergeProblemMeta(base, fresh) {
+    const out = { ...(base || {}) };
+    for (const [key, value] of Object.entries(fresh || {})) {
+      if (value == null || value === "") continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+      out[key] = value;
+    }
+    return out;
+  }
+
+  function rememberProblemMeta(meta) {
+    if (!meta) return meta;
+    const mergedBySlug = meta.slug
+      ? mergeProblemMeta(problemMetaCache.get(meta.slug), meta)
+      : meta;
+    if (meta.slug) problemMetaCache.set(meta.slug, mergedBySlug);
+    if (mergedBySlug.problem_id) {
+      problemMetaCacheById.set(String(mergedBySlug.problem_id), mergedBySlug);
+    }
+    return mergedBySlug;
+  }
+
+  function getCachedProblemMeta(slug, problemId) {
+    if (slug && problemMetaCache.has(slug)) return problemMetaCache.get(slug);
+    if (problemId != null && problemMetaCacheById.has(String(problemId))) {
+      return problemMetaCacheById.get(String(problemId));
+    }
+    return null;
+  }
+
+  function looksLikeRealSlug(slug) {
+    return Boolean(slug) && !/^problem-\d+$/i.test(String(slug));
+  }
+
+  async function fetchProblemMetaBySlug(slug) {
+    if (!looksLikeRealSlug(slug)) return null;
+    if (difficultyFetchCache.has(slug)) return difficultyFetchCache.get(slug);
+
+    const fetcher = (async () => {
+      try {
+        const originalFetch = window.__leetcodeTrackerOriginalFetch || window.fetch.bind(window);
+        const res = await originalFetch("https://leetcode.cn/graphql/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query:
+              "query questionData($titleSlug: String!) { question(titleSlug: $titleSlug) { difficulty questionFrontendId translatedTitle title titleSlug } }",
+            variables: { titleSlug: slug },
+          }),
+        });
+        const data = await res.json();
+        const q = data?.data?.question;
+        if (!q) return null;
+        return rememberProblemMeta({
+          problem_id: Number(q.questionFrontendId) || null,
+          title: q.translatedTitle || q.title || null,
+          slug: q.titleSlug || slug,
+          difficulty: difficultyLabel(q.difficulty),
+          tags: [],
+        });
+      } catch (err) {
+        debug("difficulty fetch failed", { slug, error: String(err) });
+        return null;
+      }
+    })();
+
+    difficultyFetchCache.set(slug, fetcher);
+    return fetcher;
+  }
+
+  async function ensureDifficulty(meta) {
+    if (meta?.difficulty) return meta;
+    const slug = meta?.slug;
+    const cached = getCachedProblemMeta(slug, meta?.problem_id);
+    if (cached?.difficulty) return mergeProblemMeta(meta, cached);
+
+    if (!looksLikeRealSlug(slug)) return meta;
+    const fetched = await fetchProblemMetaBySlug(slug);
+    return fetched ? mergeProblemMeta(meta, fetched) : meta;
+  }
+
+  function resolveProblemMeta(baseMeta, questionObj) {
+    const fresh = rememberProblemMeta(extractProblemMeta());
+    const slug = fresh.slug || baseMeta?.slug;
+    const problemId = fresh.problem_id || baseMeta?.problem_id;
+    let meta = mergeProblemMeta(baseMeta, getCachedProblemMeta(slug, problemId));
+    meta = mergeProblemMeta(meta, fresh);
+    if (questionObj) {
+      const fromQuestion = {
+        problem_id: null,
+        title: null,
+        slug: null,
+        difficulty: null,
+        tags: [],
+      };
+      applyQuestionMeta(fromQuestion, questionObj);
+      meta = mergeProblemMeta(meta, rememberProblemMeta(fromQuestion));
+    }
+    return meta;
+  }
+
+  function startProblemMetaWatch() {
+    if (window.__leetcodeTrackerMetaWatchStarted) return;
+    window.__leetcodeTrackerMetaWatchStarted = true;
+
+    const refresh = () => {
+      rememberProblemMeta(extractProblemMeta());
+    };
+
+    const observer = new MutationObserver(refresh);
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    setInterval(refresh, 2000);
+    refresh();
+  }
+
   function difficultyLabel(value) {
     if (value == null) return null;
+    if (typeof value === "object") {
+      return (
+        difficultyLabel(value.level) ||
+        difficultyLabel(value.difficulty) ||
+        difficultyLabel(value.name) ||
+        difficultyLabel(value.slug)
+      );
+    }
     if (typeof value === "number") {
       return { 1: "Easy", 2: "Medium", 3: "Hard" }[value] || null;
     }
@@ -95,6 +226,9 @@
       easy: "Easy",
       medium: "Medium",
       hard: "Hard",
+      EASY: "Easy",
+      MEDIUM: "Medium",
+      HARD: "Hard",
       Easy: "Easy",
       Medium: "Medium",
       Hard: "Hard",
@@ -103,6 +237,24 @@
       困难: "Hard",
     };
     return map[s] || map[s.toLowerCase()] || null;
+  }
+
+  function difficultyFromDom() {
+    const tagged = document.querySelector("[data-difficulty]");
+    if (tagged) {
+      const fromAttr = difficultyLabel(tagged.getAttribute("data-difficulty"));
+      if (fromAttr) return fromAttr;
+    }
+
+    for (const el of document.querySelectorAll("[class*='text-difficulty']")) {
+      const cls = String(el.className || "");
+      if (/text-difficulty-easy/i.test(cls)) return "Easy";
+      if (/text-difficulty-medium/i.test(cls)) return "Medium";
+      if (/text-difficulty-hard/i.test(cls)) return "Hard";
+      const fromText = difficultyLabel(el.textContent || "");
+      if (fromText) return fromText;
+    }
+    return null;
   }
 
   const STATUS_CODE_MAP = {
@@ -152,6 +304,37 @@
     return { problem_id: null, title: cleaned };
   }
 
+  function extractQuestionFromDehydratedState(pageProps) {
+    const queries = pageProps?.dehydratedState?.queries;
+    if (!Array.isArray(queries)) return null;
+    for (const query of queries) {
+      const q = query?.state?.data?.question;
+      if (q && (q.titleSlug || q.questionFrontendId || q.title || q.translatedTitle)) {
+        return q;
+      }
+    }
+    return null;
+  }
+
+  function applyQuestionMeta(meta, q) {
+    if (!q) return;
+    meta.problem_id = Number(
+      q.questionFrontendId || q.frontendQuestionId || q.questionId || meta.problem_id
+    );
+    meta.title = q.translatedTitle || q.title || meta.title;
+    meta.slug = q.titleSlug || q.questionTitleSlug || meta.slug;
+    meta.difficulty =
+      difficultyLabel(q.difficulty) ||
+      difficultyLabel(q.difficultyLevel) ||
+      difficultyLabel(q.level) ||
+      meta.difficulty;
+    if (Array.isArray(q.topicTags)) {
+      meta.tags = q.topicTags
+        .map((t) => t.translatedName || t.name || t.slug)
+        .filter(Boolean);
+    }
+  }
+
   function extractProblemMeta() {
     const meta = {
       problem_id: null,
@@ -168,23 +351,12 @@
     const nextData = document.getElementById("__NEXT_DATA__");
     if (nextData && nextData.textContent) {
       const data = parseJsonSafe(nextData.textContent);
+      const pageProps = data?.props?.pageProps;
       const q =
-        data?.props?.pageProps?.question ||
-        data?.props?.pageProps?.data?.question ||
-        null;
-      if (q) {
-        meta.problem_id = Number(
-          q.questionFrontendId || q.frontendQuestionId || q.questionId || meta.problem_id
-        );
-        meta.title = q.translatedTitle || q.title || meta.title;
-        meta.slug = q.titleSlug || meta.slug;
-        meta.difficulty = difficultyLabel(q.difficulty);
-        if (Array.isArray(q.topicTags)) {
-          meta.tags = q.topicTags
-            .map((t) => t.translatedName || t.name || t.slug)
-            .filter(Boolean);
-        }
-      }
+        pageProps?.question ||
+        pageProps?.data?.question ||
+        extractQuestionFromDehydratedState(pageProps);
+      applyQuestionMeta(meta, q);
     }
 
     try {
@@ -222,7 +394,9 @@
       }
     }
 
-    return meta;
+    if (!meta.difficulty) meta.difficulty = difficultyFromDom();
+
+    return rememberProblemMeta(meta);
   }
 
   function rememberSubmit(submissionId, bodyObj, meta) {
@@ -325,7 +499,7 @@
       memoryMb = memory;
     }
 
-    const meta = { ...(pendingItem.meta || {}), ...extractProblemMeta() };
+    const meta = resolveProblemMeta(pendingItem.meta, check.question);
     let finalProblemId = Number(meta.problem_id) || null;
     if (!finalProblemId) {
       const qid = check.question_id || check.questionId;
@@ -337,12 +511,11 @@
       return;
     }
 
-    emit({
+    const payloadBase = {
       submission_id: pendingItem.submission_id,
       problem_id: finalProblemId,
       title: meta.title || `Problem ${finalProblemId}`,
       slug: meta.slug || `problem-${finalProblemId}`,
-      difficulty: meta.difficulty,
       tags: meta.tags || [],
       status,
       code: pendingItem.code || check.code || null,
@@ -350,8 +523,18 @@
       memory_mb: memoryMb,
       language:
         pendingItem.language || check.lang || check.pretty_lang || check.lang_name || null,
+    };
+
+    void ensureDifficulty(meta).then((resolvedMeta) => {
+      emit({
+        ...payloadBase,
+        title: resolvedMeta.title || payloadBase.title,
+        slug: resolvedMeta.slug || payloadBase.slug,
+        difficulty: resolvedMeta.difficulty || null,
+        tags: resolvedMeta.tags || payloadBase.tags,
+      });
+      pending.delete(key);
     });
-    pending.delete(key);
   }
 
   function absoluteUrl(url) {
@@ -449,6 +632,7 @@
         status_memory: detail.memory,
         lang: detail.langName || detail.lang?.name || detail.lang,
         code: detail.code,
+        question: detail.question || null,
         question_id:
           detail.question?.questionFrontendId || detail.question?.questionId || null,
       });
@@ -520,6 +704,7 @@
   }
 
   window.__leetcodeTrackerInjected = true;
+  startProblemMetaWatch();
   if (!window.__leetcodeTrackerCleanerStarted) {
     window.__leetcodeTrackerCleanerStarted = true;
     setInterval(pruneMaps, CLEAN_EVERY_MS);

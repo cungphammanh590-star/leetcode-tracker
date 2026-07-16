@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Any, Optional
+
+from leetcode_tracker.problem_stats import apply_submission_stats, sync_problem_meta
 
 
 class StoreError(Exception):
@@ -69,6 +73,46 @@ def normalize_status(value: Any) -> str:
     return _STATUS_MAP.get(text, text)
 
 
+def _looks_like_real_slug(slug: str) -> bool:
+    slug = slug.strip()
+    return bool(slug) and not slug.startswith("problem-")
+
+
+def fetch_difficulty_from_leetcode(slug: str) -> Optional[str]:
+    """扩展未采到难度时，用题目 slug 向 leetcode.cn GraphQL 补全。"""
+    if not _looks_like_real_slug(slug):
+        return None
+    query = (
+        "query questionData($titleSlug: String!) {"
+        " question(titleSlug: $titleSlug) { difficulty } }"
+    )
+    body = json.dumps(
+        {"query": query, "variables": {"titleSlug": slug}},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        "https://leetcode.cn/graphql/",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+    diff = data.get("data", {}).get("question", {}).get("difficulty")
+    return normalize_difficulty(diff)
+
+
+def resolve_difficulty(payload: dict[str, Any]) -> Optional[str]:
+    diff = normalize_difficulty(payload.get("difficulty"))
+    if diff:
+        return diff
+    slug = str(payload.get("slug") or "").strip()
+    return fetch_difficulty_from_leetcode(slug)
+
+
 def upsert_problem(
     conn: sqlite3.Connection,
     *,
@@ -97,6 +141,14 @@ def upsert_problem(
             tags = COALESCE(excluded.tags, problems.tags)
         """,
         (problem_id, title, slug, diff, tags_json),
+    )
+    sync_problem_meta(
+        conn,
+        problem_id=problem_id,
+        title=title,
+        slug=slug,
+        difficulty=diff,
+        tags=tags_json,
     )
 
 
@@ -143,21 +195,22 @@ def save_submission(conn: sqlite3.Connection, payload: dict[str, Any]) -> SaveRe
     if language is not None:
         language = str(language)
 
-    existing = conn.execute(
-        "SELECT 1 FROM submissions WHERE submission_id = ?",
-        (submission_id,),
-    ).fetchone()
-    if existing:
-        return SaveResult(created=False, submission_id=submission_id)
-
     upsert_problem(
         conn,
         problem_id=problem_id,
         title=title,
         slug=slug,
-        difficulty=payload.get("difficulty"),
+        difficulty=resolve_difficulty(payload),
         tags=payload.get("tags"),
     )
+
+    existing = conn.execute(
+        "SELECT 1 FROM submissions WHERE submission_id = ?",
+        (submission_id,),
+    ).fetchone()
+    if existing:
+        conn.commit()
+        return SaveResult(created=False, submission_id=submission_id)
 
     try:
         conn.execute(
@@ -168,6 +221,18 @@ def save_submission(conn: sqlite3.Connection, payload: dict[str, Any]) -> SaveRe
             """,
             (submission_id, problem_id, status, code, runtime_ms, memory_mb, language),
         )
+        submitted = conn.execute(
+            "SELECT submitted_at FROM submissions WHERE submission_id = ?",
+            (submission_id,),
+        ).fetchone()
+        submitted_at = str(submitted["submitted_at"]) if submitted else None
+        if submitted_at:
+            apply_submission_stats(
+                conn,
+                problem_id=problem_id,
+                status=status,
+                submitted_at=submitted_at,
+            )
         conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()

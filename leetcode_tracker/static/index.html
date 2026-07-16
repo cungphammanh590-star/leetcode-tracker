@@ -63,6 +63,9 @@
     th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
     th { color: var(--muted); font-weight: 500; }
     .ok { color: var(--ok); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .link-title { font-weight: 500; }
     .bars { display: flex; gap: 8px; align-items: flex-end; height: 90px; }
     .bar {
       flex: 1;
@@ -105,9 +108,17 @@
     </section>
 
     <section>
+      <h2>题目画像</h2>
+      <table>
+        <thead><tr><th>题目</th><th>难度</th><th>尝试</th><th>AC</th><th>挣扎指数</th><th>最近提交</th></tr></thead>
+        <tbody id="problems"></tbody>
+      </table>
+    </section>
+
+    <section>
       <h2>今日错题</h2>
       <table>
-        <thead><tr><th>题目</th><th>难度</th><th>状态</th></tr></thead>
+        <thead><tr><th>题目</th><th>难度</th><th>错误汇总</th></tr></thead>
         <tbody id="wrong"></tbody>
       </table>
     </section>
@@ -121,6 +132,25 @@
     </section>
   </main>
   <script>
+    function formatStatusCounts(counts) {
+      return Object.entries(counts || {})
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([status, count]) => status + " ×" + count)
+        .join("，");
+    }
+
+    function problemLink(id, title) {
+      return (
+        '<a class="link-title" href="/problems/' +
+        id +
+        '">' +
+        id +
+        ". " +
+        title +
+        "</a>"
+      );
+    }
+
     async function refresh() {
       try {
         const res = await fetch("/api/stats");
@@ -143,6 +173,39 @@
           })
           .join("");
 
+        const problems = document.getElementById("problems");
+        try {
+          const pres = await fetch("/api/problems");
+          const pdata = await pres.json();
+          const list = pdata.problems || [];
+          if (!list.length) {
+            problems.innerHTML = '<tr><td colspan="6">暂无题目记录</td></tr>';
+          } else {
+            problems.innerHTML = list
+              .map((p) => {
+                const struggle = Math.round((p.struggle_score || 0) * 100) + "%";
+                return (
+                  "<tr><td>" +
+                  problemLink(p.problem_id, p.title) +
+                  "</td><td>" +
+                  (p.difficulty || "-") +
+                  "</td><td>" +
+                  p.total_attempts +
+                  "</td><td>" +
+                  p.accepted_count +
+                  "</td><td>" +
+                  struggle +
+                  "</td><td>" +
+                  (p.last_submitted_at || "—") +
+                  "</td></tr>"
+                );
+              })
+              .join("");
+          }
+        } catch {
+          problems.innerHTML = '<tr><td colspan="6">无法加载题目列表</td></tr>';
+        }
+
         const wrong = document.getElementById("wrong");
         if (!data.today_wrong.length) {
           wrong.innerHTML = '<tr><td colspan="3">今日无错题</td></tr>';
@@ -151,13 +214,11 @@
             .map(
               (i) =>
                 "<tr><td>" +
-                i.problem_id +
-                ". " +
-                i.title +
+                problemLink(i.problem_id, i.title) +
                 "</td><td>" +
                 (i.difficulty || "-") +
                 "</td><td>" +
-                i.status +
+                formatStatusCounts(i.status_counts) +
                 "</td></tr>"
             )
             .join("");
@@ -171,9 +232,7 @@
               "<tr><td>" +
               i.submitted_at +
               "</td><td>" +
-              i.problem_id +
-              ". " +
-              i.title +
+              problemLink(i.problem_id, i.title) +
               '</td><td class="' +
               cls +
               '">' +

@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
+from leetcode_tracker.problem_stats import ensure_stats_materialized, get_today_wrong_summary
+
 
 @dataclass
 class OverviewStats:
@@ -88,6 +90,45 @@ def get_today_wrong(conn: sqlite3.Connection, today: Optional[date] = None) -> l
     return [_row_to_item(r) for r in rows]
 
 
+def summarize_today_wrong(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按题目汇总今日错题，每种错误类型统计次数。"""
+    grouped: dict[int, dict[str, Any]] = {}
+    for item in items:
+        pid = int(item["problem_id"])
+        bucket = grouped.get(pid)
+        if bucket is None:
+            bucket = {
+                "problem_id": pid,
+                "title": item["title"],
+                "slug": item["slug"],
+                "difficulty": item["difficulty"],
+                "total": 0,
+                "status_counts": {},
+            }
+            grouped[pid] = bucket
+        if item["difficulty"] and not bucket["difficulty"]:
+            bucket["difficulty"] = item["difficulty"]
+        status = str(item["status"])
+        counts = bucket["status_counts"]
+        counts[status] = int(counts.get(status, 0)) + 1
+        bucket["total"] += 1
+
+    result = list(grouped.values())
+    for bucket in result:
+        counts = bucket["status_counts"]
+        bucket["status_counts"] = dict(
+            sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
+    result.sort(key=lambda row: (-int(row["total"]), int(row["problem_id"])))
+    return result
+
+
+def format_status_counts(status_counts: dict[str, int]) -> str:
+    if not status_counts:
+        return "-"
+    return ", ".join(f"{status}×{count}" for status, count in status_counts.items())
+
+
 def get_last7_days(conn: sqlite3.Connection, today: Optional[date] = None) -> list[dict[str, Any]]:
     today = today or _local_today()
     result: list[dict[str, Any]] = []
@@ -123,6 +164,7 @@ def get_last7_days(conn: sqlite3.Connection, today: Optional[date] = None) -> li
 
 
 def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> OverviewStats:
+    ensure_stats_materialized(conn)
     today = _local_today()
     today_str = today.isoformat()
 
@@ -189,6 +231,8 @@ def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> Overvie
         (today_str,),
     ).fetchall()
 
+    today_wrong = get_today_wrong_summary(conn, today)
+
     return OverviewStats(
         total_submissions=total,
         accepted_count=accepted,
@@ -202,7 +246,7 @@ def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> Overvie
         streak_days=compute_streak(conn, today),
         recent=[_row_to_item(r) for r in recent_rows],
         today_items=[_row_to_item(r) for r in today_rows],
-        today_wrong=get_today_wrong(conn, today),
+        today_wrong=today_wrong,
         last7=get_last7_days(conn, today),
     )
 
@@ -217,7 +261,7 @@ def format_stats_text(stats: OverviewStats) -> str:
         "============",
         f"今日提交: {stats.today_submissions}",
         f"今日通过: {stats.today_accepted} ({stats.today_acceptance_rate}%)",
-        f"今日错题: {len(stats.today_wrong)}",
+        f"今日错题: {sum(item['total'] for item in stats.today_wrong)}",
         f"累计提交: {stats.total_submissions}",
         f"累计通过: {stats.accepted_count} ({stats.acceptance_rate}%)",
         f"难度通过(去重): Easy {stats.easy_solved} / Medium {stats.medium_solved} / Hard {stats.hard_solved}",
@@ -233,8 +277,10 @@ def format_stats_text(stats: OverviewStats) -> str:
         lines.append("")
         lines.append("今日错题:")
         for item in stats.today_wrong:
+            summary = format_status_counts(item["status_counts"])
             lines.append(
-                f"  {item['problem_id']}. {item['title']} | {item['status']}"
+                f"  {item['problem_id']}. {item['title']} | "
+                f"{item['difficulty'] or '-'} | {summary}"
             )
     lines.append("")
     lines.append(f"最近 {len(stats.recent)} 条提交:")

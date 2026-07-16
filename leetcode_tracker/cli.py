@@ -12,6 +12,7 @@ from leetcode_tracker.autostart import clean_logs, install_autostart, uninstall_
 from leetcode_tracker.config import DEFAULTS, load_config, set_config_value
 from leetcode_tracker.db import init_db
 from leetcode_tracker.paths import db_path
+from leetcode_tracker.problem_stats import ensure_stats_materialized, get_llm_context, rebuild_stats
 from leetcode_tracker.report import clean_reports, write_today_report
 from leetcode_tracker.server import run_server
 from leetcode_tracker.stats import format_stats_text, get_overview
@@ -31,6 +32,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("stats", help="打印刷题统计概览")
     sub.add_parser("app", help="用 pywebview 打开桌面仪表盘")
+
+    rebuild = sub.add_parser("rebuild-stats", help="从 submissions 重建题目汇总表")
+    rebuild.add_argument(
+        "--incremental",
+        action="store_true",
+        help="不清空汇总表（默认全量重建）",
+    )
+
+    llm = sub.add_parser("llm-context", help="输出单题 LLM 分析上下文（Markdown）")
+    llm.add_argument("problem_id", type=int, help="题号，如 560")
 
     report = sub.add_parser("report", help="生成或清理 Markdown 日报")
     report.add_argument("--today", action="store_true", help="生成今日日报")
@@ -140,6 +151,29 @@ def cmd_app(_: argparse.Namespace) -> int:
     return run_app()
 
 
+def cmd_rebuild_stats(args: argparse.Namespace) -> int:
+    conn = init_db()
+    try:
+        count = rebuild_stats(conn, from_scratch=not args.incremental)
+    finally:
+        conn.close()
+    print(f"Rebuilt stats for {count} problem(s)")
+    return 0
+
+
+def cmd_llm_context(args: argparse.Namespace) -> int:
+    conn = init_db()
+    try:
+        ensure_stats_materialized(conn)
+        text = get_llm_context(conn, args.problem_id)
+    finally:
+        conn.close()
+    sys.stdout.write(text)
+    if not text.endswith("\n"):
+        sys.stdout.write("\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -151,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
         "config": cmd_config,
         "autostart": cmd_autostart,
         "app": cmd_app,
+        "rebuild-stats": cmd_rebuild_stats,
+        "llm-context": cmd_llm_context,
     }
     handler = dispatch.get(args.command)
     if not handler:

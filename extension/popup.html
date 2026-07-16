@@ -26,7 +26,7 @@
       code { font-size: 11px; background: #ebeae6; padding: 1px 4px; border-radius: 3px; }
       button {
         width: 100%;
-        margin-top: 10px;
+        margin-top: 8px;
         border: 0;
         border-radius: 6px;
         padding: 8px;
@@ -34,6 +34,15 @@
         color: #fff;
         font-size: 12px;
         cursor: pointer;
+      }
+      button.secondary {
+        background: #e7e5e4;
+        color: #44403c;
+      }
+      button:disabled {
+        background: #d6d3d1;
+        color: #a8a29e;
+        cursor: not-allowed;
       }
       #last { margin-top: 8px; font-size: 11px; word-break: break-word; }
     </style>
@@ -44,10 +53,11 @@
     <div class="row"><span>库内提交数</span><span id="count">—</span></div>
     <div id="last" class="muted">最近一次：尚无记录</div>
     <p class="muted">
-      仅支持 <code>leetcode.cn</code>。请先
-      <code>leetcode-tracker serve</code> 或 <code>app</code>，再在题目页提交。
+      仅支持 <code>leetcode.cn</code>。请先打开本机 App 或运行
+      <code>leetcode-tracker serve</code>，再在题目页提交。
     </p>
-    <button id="refresh" type="button">重新检测</button>
+    <button id="open-dashboard" type="button" disabled>打开仪表盘</button>
+    <button id="refresh" class="secondary" type="button">重新检测</button>
     <script src="popup.js"></script>
   </body>
 </html>
