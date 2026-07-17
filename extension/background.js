@@ -3,227 +3,167 @@
 const DEFAULT_PORT = 8763;
 let bridgePort = DEFAULT_PORT;
 
-function getStorageArea() {
-  try {
-    if (chrome.storage && chrome.storage.session) {
-      return chrome.storage.session;
-    }
-  } catch (_err) {
-    // session storage unavailable in some builds
-  }
-  return chrome.storage.local;
-}
+console.info("[leetcode-tracker] background loaded", {
+  version: chrome.runtime.getManifest().version,
+});
 
-async function getBridgeBase() {
+async function bridgeBase() {
   return `http://127.0.0.1:${bridgePort}`;
 }
 
-async function saveCoachLink(notificationId, url) {
-  const store = getStorageArea();
-  const key = "coachLinks";
-  const stored = await store.get([key]);
-  const links = stored[key] || {};
-  links[notificationId] = url;
-  await store.set({ [key]: links });
-}
-
-async function popCoachLink(notificationId) {
-  const store = getStorageArea();
-  const key = "coachLinks";
-  const stored = await store.get([key]);
-  const links = stored[key] || {};
-  const url = links[notificationId];
-  if (url) {
-    delete links[notificationId];
-    await store.set({ [key]: links });
+async function refreshBridge() {
+  try {
+    const response = await fetch(`http://127.0.0.1:${DEFAULT_PORT}/health`);
+    if (!response.ok) return null;
+    const health = await response.json();
+    bridgePort = Number(health.port) || DEFAULT_PORT;
+    return health;
+  } catch (_error) {
+    return null;
   }
-  return url || null;
 }
 
-async function refreshBridgeFromHealth() {
-  const ports = [bridgePort, DEFAULT_PORT];
-  for (const port of [...new Set(ports)]) {
+async function postSubmission(payload) {
+  const post = async (port) => {
+    const response = await fetch(`http://127.0.0.1:${port}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const text = await response.text();
+    let data;
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data && data.port) {
-        bridgePort = Number(data.port) || port;
-      } else {
-        bridgePort = port;
-      }
-      return data;
-    } catch (_err) {
-      // try next port
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
     }
-  }
-  return null;
-}
+    if (!response.ok) {
+      throw new Error(data.message || `HTTP ${response.status}`);
+    }
+    return data;
+  };
 
-chrome.runtime.onStartup.addListener(() => {
-  refreshBridgeFromHealth().catch(() => {});
-});
-chrome.runtime.onInstalled.addListener(() => {
-  refreshBridgeFromHealth().catch(() => {});
-});
+  try {
+    return await post(bridgePort);
+  } catch (firstError) {
+    const health = await refreshBridge();
+    if (!health) throw firstError;
+    return post(bridgePort);
+  }
+}
 
 async function setBadge(text, color) {
   try {
-    await chrome.action.setBadgeText({ text: text || "" });
-    if (color) await chrome.action.setBadgeBackgroundColor({ color });
-  } catch (_err) {
-    // ignore
+    await chrome.action.setBadgeText({ text });
+    await chrome.action.setBadgeBackgroundColor({ color });
+  } catch (_error) {
+    // Cosmetic only.
   }
 }
 
-async function clearBadgeLater() {
+function clearBadgeLater() {
   chrome.alarms.create("clear-badge", { delayInMinutes: 0.25 });
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "clear-badge") setBadge("", "#000000");
+  if (alarm.name === "clear-badge") {
+    setBadge("", "#000000");
+  }
 });
 
 async function remember(event) {
-  await chrome.storage.local.set({ lastEvent: { ...event, at: Date.now() } });
-}
-
-async function rememberProblemContext(payload) {
-  if (!payload) return;
   await chrome.storage.local.set({
-    currentProblem: { ...payload, at: Date.now() },
+    lastEvent: { ...event, at: Date.now() },
   });
 }
 
-async function notify(title, message, submissionId) {
-  const notificationId = submissionId
-    ? `coach-${submissionId}`
-    : `evt-${Date.now()}`;
-  if (submissionId) {
-    const base = await getBridgeBase();
-    await saveCoachLink(
-      notificationId,
-      `${base}/coach?submission=${encodeURIComponent(submissionId)}`
-    );
-  }
+async function notify(title, message) {
   try {
-    await chrome.notifications.create(notificationId, {
+    await chrome.notifications.create({
       type: "basic",
       iconUrl: "icons/icon128.png",
       title,
       message,
       priority: 1,
     });
-  } catch (err) {
-    console.warn("[leetcode-tracker] notification failed", err);
+  } catch (_error) {
+    // Notification permission or OS state must not affect capture.
   }
 }
 
-chrome.notifications.onClicked.addListener(async (notificationId) => {
-  const url = await popCoachLink(notificationId);
-  if (!url) return;
-  try {
-    await chrome.tabs.create({ url });
-  } catch (err) {
-    console.warn("[leetcode-tracker] open coach tab failed", err);
-  }
+chrome.runtime.onStartup.addListener(() => {
+  refreshBridge().catch(() => {});
 });
 
-async function postSubmission(payload) {
-  await refreshBridgeFromHealth();
-  const base = await getBridgeBase();
-  const response = await fetch(`${base}/submit`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const text = await response.text();
-  let data = null;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { message: text };
-  }
-  if (!response.ok) {
-    const err = new Error(data?.message || `HTTP ${response.status}`);
-    err.status = response.status;
-    throw err;
-  }
-  return data;
-}
-
-async function engageCoach(submissionId) {
-  try {
-    const base = await getBridgeBase();
-    await fetch(`${base}/api/coach/engage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submission_id: submissionId }),
-    });
-  } catch (err) {
-    console.warn("[leetcode-tracker] coach engage failed", err);
-  }
-}
+chrome.runtime.onInstalled.addListener(() => {
+  refreshBridge().catch(() => {});
+});
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || !message.type) return false;
 
-  if (message.type === "problem_context") {
-    rememberProblemContext(message.payload)
-      .then(() => sendResponse({ ok: true }))
-      .catch((err) => sendResponse({ ok: false, error: String(err) }));
-    return true;
-  }
-
   if (message.type === "get_bridge_health") {
-    refreshBridgeFromHealth()
-      .then(async (data) => {
-        const base = await getBridgeBase();
-        sendResponse({ ok: Boolean(data), base, health: data });
+    refreshBridge()
+      .then(async (health) => {
+        sendResponse({
+          ok: Boolean(health),
+          base: await bridgeBase(),
+          health,
+        });
       })
-      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      .catch((error) => sendResponse({ ok: false, error: String(error) }));
     return true;
   }
 
   if (message.type === "get_current_problem") {
     chrome.storage.local
       .get(["currentProblem"])
-      .then((stored) => sendResponse({ ok: true, problem: stored.currentProblem || null }))
-      .catch((err) => sendResponse({ ok: false, error: String(err) }));
+      .then((stored) =>
+        sendResponse({ ok: true, problem: stored.currentProblem || null })
+      )
+      .catch((error) => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
+
+  if (message.type === "problem_context") {
+    chrome.storage.local
+      .set({ currentProblem: { ...message.payload, at: Date.now() } })
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: String(error) }));
     return true;
   }
 
   if (message.type !== "submission") return false;
 
   const payload = message.payload;
+  console.info("[leetcode-tracker] background received", {
+    submission_id: payload?.submission_id,
+    problem_id: payload?.problem_id,
+  });
+
+  // This is deliberately the only capture side effect:
+  // content message -> bridge /submit -> SQLite. No coach, queue, or LLM work.
   postSubmission(payload)
     .then(async (data) => {
-      const isNew = data?.created === true;
-      await setBadge(isNew ? "ok" : "dup", "#0a7");
-      clearBadgeLater();
-      const summary = `${payload.problem_id}. ${payload.title} (${payload.status})`;
+      const isNew = data.created === true;
+      const summary = `${payload.problem_id}. ${payload.title || "题目"} (${payload.status})`;
       await remember({ ok: true, summary, data });
-      if (isNew) {
-        const sid = data.submission_id || payload.submission_id;
-        engageCoach(sid);
-        await notify("提交已记录 · 和陪练聊聊", `${summary}\n点击打开本机陪练页`, sid);
-      } else {
-        await notify("已存在该提交", summary);
-      }
+      setBadge(isNew ? "ok" : "dup", "#0a7");
+      clearBadgeLater();
+      notify(isNew ? "提交已记录" : "已存在该提交", summary);
+      console.info("[leetcode-tracker] saved", {
+        submission_id: payload.submission_id,
+        created: data.created,
+      });
       sendResponse({ ok: true, data });
     })
-    .catch(async (err) => {
-      await setBadge("!", "#c00");
-      await remember({
-        ok: false,
-        error: String(err.message || err),
-        summary: payload?.title || "",
-      });
-      await notify(
-        "投递失败",
-        `${err.message || err}。请先运行 leetcode-tracker serve`
-      );
-      sendResponse({ ok: false, error: String(err.message || err) });
+    .catch(async (error) => {
+      const messageText = String(error.message || error);
+      await remember({ ok: false, error: messageText, summary: payload?.title || "" });
+      setBadge("!", "#c00");
+      notify("投递失败", messageText);
+      console.error("[leetcode-tracker] submit failed", messageText);
+      sendResponse({ ok: false, error: messageText });
     });
 
   return true;

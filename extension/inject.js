@@ -75,6 +75,7 @@
       status: payload.status,
       difficulty: payload.difficulty,
     });
+    // 只走 postMessage（与旧版一致）；勿再发 CustomEvent，否则 content 会双投递
     window.postMessage(
       { source: "leetcode-tracker", type: "submission", payload },
       "*"
@@ -87,6 +88,57 @@
     } catch {
       return null;
     }
+  }
+
+  function extractRequestBody(input, init) {
+    // 严禁消费会传给 fetch 的 body 流，否则会触发 InvalidStateError 并弄坏力扣请求
+    try {
+      if (init && typeof init.body === "string") return init.body;
+      if (init && init.body instanceof URLSearchParams) return init.body.toString();
+      if (
+        input &&
+        typeof input !== "string" &&
+        typeof Request !== "undefined" &&
+        input instanceof Request
+      ) {
+        // 只能 clone 再读；失败则放弃 body（仍可从 check 补全）
+        return null;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
+  async function readRequestBodySafe(input, init) {
+    const sync = extractRequestBody(input, init);
+    if (sync != null) return sync;
+    try {
+      if (
+        input &&
+        typeof input !== "string" &&
+        typeof Request !== "undefined" &&
+        input instanceof Request
+      ) {
+        return await input.clone().text();
+      }
+    } catch {
+      // ignore
+    }
+    return "";
+  }
+
+  function extractSubmitIdFromResponse(resp) {
+    const direct = findSubmissionId(resp, 0);
+    if (direct != null) return direct;
+    const data = resp && resp.data;
+    if (!data || typeof data !== "object") return null;
+    for (const node of Object.values(data)) {
+      if (!node || typeof node !== "object") continue;
+      const id = node.submissionId ?? node.submission_id ?? node.interpretId ?? node.interpret_id;
+      if (id != null && String(id).trim() !== "") return id;
+    }
+    return null;
   }
 
   function mergeProblemMeta(base, fresh) {
@@ -476,17 +528,43 @@
   }
 
   function isFinishedCheck(check) {
+    if (check.isPending === true) return false;
     const state = String(check.state || "").toUpperCase();
     if (state === "PENDING" || state === "STARTED") return false;
     if (check.finished === false) return false;
     if (state === "SUCCESS") return true;
     if (check.finished === true) return true;
     if (check.status_code != null && Number(check.status_code) > 0) return true;
-    if (check.status_msg || check.statusMsg) return true;
+    if (check.status_msg || check.statusMsg || check.statusDisplay) return true;
     return false;
   }
 
-  function finalizeFromCheck(submissionId, check) {
+  async function resolveFinalProblemId(meta, check) {
+    let finalProblemId = Number(meta.problem_id) || null;
+    if (!finalProblemId && check.question) {
+      const q = check.question;
+      finalProblemId =
+        Number(q.questionFrontendId || q.frontendQuestionId || q.questionId) || null;
+    }
+    if (!finalProblemId) {
+      const qid = check.question_id || check.questionId;
+      if (qid != null && String(qid).trim() !== "") finalProblemId = Number(qid);
+    }
+    if (!finalProblemId && meta.slug) {
+      const cached = getCachedProblemMeta(meta.slug, null);
+      if (cached?.problem_id) finalProblemId = Number(cached.problem_id);
+    }
+    if (!finalProblemId && meta.slug && looksLikeRealSlug(meta.slug)) {
+      const fetched = await Promise.race([
+        fetchProblemMetaBySlug(meta.slug),
+        new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
+      ]);
+      if (fetched?.problem_id) finalProblemId = Number(fetched.problem_id);
+    }
+    return finalProblemId;
+  }
+
+  async function finalizeFromCheck(submissionId, check) {
     const key = String(submissionId);
     if (!isFinishedCheck(check)) {
       debug("check pending", { submissionId: key, state: check.state });
@@ -528,11 +606,7 @@
     }
 
     const meta = resolveProblemMeta(pendingItem.meta, check.question);
-    let finalProblemId = Number(meta.problem_id) || null;
-    if (!finalProblemId) {
-      const qid = check.question_id || check.questionId;
-      if (qid != null && String(qid).trim() !== "") finalProblemId = Number(qid);
-    }
+    const finalProblemId = await resolveFinalProblemId(meta, check);
 
     if (!finalProblemId) {
       debug("drop: missing problem_id", { submissionId: key, slug: meta.slug });
@@ -553,16 +627,17 @@
         pendingItem.language || check.lang || check.pretty_lang || check.lang_name || null,
     };
 
-    void ensureDifficulty(meta).then((resolvedMeta) => {
-      emit({
-        ...payloadBase,
-        title: resolvedMeta.title || payloadBase.title,
-        slug: resolvedMeta.slug || payloadBase.slug,
-        difficulty: resolvedMeta.difficulty || null,
-        tags: resolvedMeta.tags || payloadBase.tags,
-      });
-      pending.delete(key);
+    emit({
+      ...payloadBase,
+      title: meta.title || payloadBase.title,
+      slug: meta.slug || payloadBase.slug,
+      difficulty: meta.difficulty || null,
+      tags: meta.tags || payloadBase.tags,
     });
+    pending.delete(key);
+    if (!meta.difficulty && meta.slug && looksLikeRealSlug(meta.slug)) {
+      void ensureDifficulty(meta);
+    }
   }
 
   function absoluteUrl(url) {
@@ -573,22 +648,36 @@
     }
   }
 
+  function isLeetCodeHost(url) {
+    try {
+      const host = new URL(url, location.origin).hostname;
+      return /(^|\.)leetcode\.cn$/i.test(host) || /(^|\.)leetcode\.com$/i.test(host);
+    } catch {
+      return false;
+    }
+  }
+
   function interesting(url) {
-    return /submit|submission|graphql|judge|interpret/i.test(url);
+    if (!isLeetCodeHost(url)) return false;
+    return /\/(submit|submissions|graphql|judge|interpret)\b/i.test(url);
   }
 
   function handleSubmitUrl(url, requestBodyText, responseText) {
     const full = absoluteUrl(url);
+    if (!isLeetCodeHost(full)) return;
+
     const bodyText = requestBodyText || "";
     const isSubmitPath = /\/problems\/[^/]+\/submit\/?/i.test(full);
     const isGraphqlSubmit =
       /\/graphql\/?/i.test(full) &&
-      /submitCode|SubmitCode|submit\.code|interpretSolution/i.test(bodyText);
-    const isAnySubmitHint =
-      /submit/i.test(full) ||
-      (interesting(full) && /typed_code|typedCode/i.test(bodyText));
+      /submitCode|SubmitCode|submit\.code|interpretSolution|judgeSubmit|syncSubmit|typedCode|typed_code/i.test(
+        bodyText
+      );
+    // 仅认力扣提交路径 / GraphQL 提交体，避免 GA 等第三方 URL 查询串里的 submit 误伤
+    const isTypedCodePost =
+      /\/problems\//i.test(full) && /typed_code|typedCode/i.test(bodyText);
 
-    if (!isSubmitPath && !isGraphqlSubmit && !isAnySubmitHint) {
+    if (!isSubmitPath && !isGraphqlSubmit && !isTypedCodePost) {
       return;
     }
 
@@ -600,10 +689,9 @@
     const resp = parseJsonSafe(responseText);
     const body = parseJsonSafe(bodyText) || {};
     const meta = extractProblemMeta();
-    const submissionId = findSubmissionId(resp, 0);
+    const submissionId = extractSubmitIdFromResponse(resp);
 
     if (submissionId != null) {
-      // Ignore interpret (run) ids if URL says interpret and not submit — still OK to track? skip interpret
       if (/interpret/i.test(full) && !/submit/i.test(full) && !isGraphqlSubmit) {
         debug("skip interpret run", { submissionId });
         return;
@@ -622,14 +710,14 @@
     const resp = parseJsonSafe(responseText);
     if (!resp) return;
 
-    const m = full.match(/\/submissions\/detail\/(\d+)\/check\/?/i);
+    const m = full.match(/\/submissions\/detail\/(\d+)\/(?:v2\/)?check\/?/i);
     if (m) {
       debug("seen check", {
         submissionId: m[1],
         state: resp.state,
         status_code: resp.status_code,
       });
-      finalizeFromCheck(m[1], resp);
+      void finalizeFromCheck(m[1], resp);
       return;
     }
 
@@ -641,7 +729,7 @@
         submissionId: resp.submission_id,
         state: resp.state,
       });
-      finalizeFromCheck(resp.submission_id, resp);
+      void finalizeFromCheck(resp.submission_id, resp);
       return;
     }
 
@@ -650,9 +738,11 @@
       resp?.data?.submissionDetail ||
       resp?.data?.submissionCheck ||
       resp?.data?.checkSubmission ||
+      resp?.data?.syncSubmission ||
       null;
     if (detail && (detail.id || detail.submissionId)) {
-      finalizeFromCheck(detail.id || detail.submissionId, {
+      if (detail.isPending === true) return;
+      void finalizeFromCheck(detail.id || detail.submissionId, {
         state: detail.statusDisplay ? "SUCCESS" : detail.state,
         status_msg: detail.statusDisplay || detail.status_msg,
         status_code: detail.statusCode || detail.status_code,
@@ -663,6 +753,8 @@
         question: detail.question || null,
         question_id:
           detail.question?.questionFrontendId || detail.question?.questionId || null,
+        isPending: detail.isPending,
+        statusDisplay: detail.statusDisplay,
       });
     }
   }
@@ -687,17 +779,35 @@
     const originalFetch = window.fetch.bind(window);
     window.__leetcodeTrackerOriginalFetch = originalFetch;
     window.fetch = async function patchedFetch(input, init) {
+      const url = typeof input === "string" ? input : input && input.url ? input.url : "";
+      const method = (
+        (init && init.method) ||
+        (typeof input !== "string" && input && input.method) ||
+        "GET"
+      ).toUpperCase();
+      const watch = interesting(absoluteUrl(url));
+
+      let requestBodyText = "";
+      if (watch && method === "POST") {
+        try {
+          requestBodyText = await readRequestBodySafe(input, init);
+        } catch {
+          requestBodyText = "";
+        }
+      }
+
       const response = await originalFetch(input, init);
+
+      // 只观察力扣 submit/check 等；其余请求绝不 clone，避免干扰页面
+      if (!watch) return response;
       try {
-        const url = typeof input === "string" ? input : input && input.url ? input.url : "";
-        const method = (
-          (init && init.method) ||
-          (typeof input !== "string" && input && input.method) ||
-          "GET"
-        ).toUpperCase();
-        const requestBodyText =
-          init && typeof init.body === "string" ? init.body : null;
-        const clone = response.clone();
+        if (!response || response.bodyUsed) return response;
+        let clone;
+        try {
+          clone = response.clone();
+        } catch (_err) {
+          return response;
+        }
         clone
           .text()
           .then((text) => observeResponse(url, method, requestBodyText, text))
@@ -720,11 +830,25 @@
     };
     XMLHttpRequest.prototype.send = function (body) {
       this.addEventListener("load", function () {
-        const url = String(this.__ltUrl || "");
-        const method = String(this.__ltMethod || "GET").toUpperCase();
-        const text = this.responseText || "";
-        const requestBodyText = typeof body === "string" ? body : "";
-        observeResponse(url, method, requestBodyText, text);
+        try {
+          const url = String(this.__ltUrl || "");
+          if (!interesting(absoluteUrl(url))) return;
+          // responseType 非 text 时读 responseText 会抛 InvalidStateError
+          const rt = String(this.responseType || "");
+          let text = "";
+          if (!rt || rt === "text" || rt === "") {
+            text = this.responseText || "";
+          } else if (rt === "json") {
+            text = JSON.stringify(this.response || {});
+          } else {
+            return;
+          }
+          const method = String(this.__ltMethod || "GET").toUpperCase();
+          const requestBodyText = typeof body === "string" ? body : "";
+          observeResponse(url, method, requestBodyText, text);
+        } catch (_err) {
+          // 绝不能把异常冒泡到力扣页面逻辑
+        }
       });
       return originalSend.apply(this, arguments);
     };

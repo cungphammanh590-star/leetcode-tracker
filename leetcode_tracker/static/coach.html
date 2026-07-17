@@ -162,9 +162,10 @@
 
     async function engage() {
       if (!submission) {
-        showBanner("缺少 submission 参数。请从扩展通知或提交记录链接打开。");
+        showBanner("缺少 submission 参数。请从扩展通知或题目页「打开陪练」进入。");
         return;
       }
+      // 按需读库：与采集解耦，打开本页才组上下文
       const res = await fetch("/api/coach/engage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

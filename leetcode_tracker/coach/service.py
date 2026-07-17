@@ -1,10 +1,12 @@
-"""陪练会话服务：engage 无 LLM，chat 才加载 LangGraph。"""
+"""陪练会话服务：与采集解耦。
 
-from __future__ import annotations
+engage：用户打开陪练页时按需读库组上下文（模板开场，不调 LLM）。
+chat：用户开口后才加载 LangGraph，并将 session 内已缓存的 context 注入模型。
+"""
 
 import sqlite3
 from functools import lru_cache
-from typing import Any
+from typing import Annotated, Any, TypedDict
 
 from leetcode_tracker.coach.context import build_coach_context
 from leetcode_tracker.coach.opening import template_opening
@@ -22,6 +24,7 @@ def _is_done_message(text: str) -> bool:
 
 
 def engage(conn: sqlite3.Connection, submission_id: str) -> dict[str, Any]:
+    """按 submission 读库拼上下文 + 模板开场。不写 submissions，不阻塞采集。"""
     ctx = build_coach_context(conn, submission_id)
     placement = ctx.get("placement")
     opening = template_opening(
@@ -43,16 +46,16 @@ def engage(conn: sqlite3.Connection, submission_id: str) -> dict[str, Any]:
         "opening": opening,
         "problem_id": session["problem_id"],
         "submission_id": submission_id,
+        "context_preview": str(ctx["markdown"])[:400],
     }
 
 
 @lru_cache(maxsize=1)
 def _compiled_graph():
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+    from langchain_core.messages import SystemMessage
     from langgraph.checkpoint.sqlite import SqliteSaver
     from langgraph.graph import END, StateGraph
     from langgraph.graph.message import add_messages
-    from typing import Annotated, TypedDict
 
     class CoachState(TypedDict):
         messages: Annotated[list, add_messages]
@@ -70,7 +73,9 @@ def _compiled_graph():
     builder.add_node("coach_reply", coach_reply_node)
     builder.set_entry_point("coach_reply")
     builder.add_edge("coach_reply", END)
-    checkpointer = SqliteSaver.from_conn_string(str(db_path()))
+    # from_conn_string 是 contextmanager；缓存编译图需要长生命周期连接
+    ckpt_conn = sqlite3.connect(str(db_path()), check_same_thread=False)
+    checkpointer = SqliteSaver(ckpt_conn)
     return builder.compile(checkpointer=checkpointer)
 
 

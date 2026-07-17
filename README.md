@@ -31,8 +31,9 @@ leetcode-tracker kg import
 ### 浏览器扩展
 
 1. `chrome://extensions` → 开发者模式 → 加载 `extension/` 文件夹
-2. 在 **leetcode.cn 题目页** 点击扩展图标 → 弹窗顶部显示 **本题陪练建议**（图谱位置 + 模板开场，无需先提交）
-3. 正常提交后，**新提交**会通知「和陪练聊聊」，点击打开本机陪练页；重复提交不会再次 engage
+2. 在 **leetcode.cn 题目页** 点击扩展图标 → 弹窗显示 **本题陪练建议**（只读本机库，按需）
+3. 正常提交后：扩展**只负责入库**；成功会通知「提交已记录」，点击可打开陪练页
+4. **陪练与采集解耦**：不会在提交瞬间调用 LLM / engage；打开陪练页时才读库组上下文，你开口后才走 LangGraph
 
 若修改了桥接端口（`leetcode-tracker config set port 9000`），扩展会通过 `GET /health` 自动读取 `port` 字段；请重新加载扩展并重启 `serve`。
 
@@ -41,7 +42,7 @@ leetcode-tracker kg import
 | 能力 | 说明 |
 |------|------|
 | **知识图谱** | 自 [algorithm-stone](https://github.com/acm-clan/algorithm-stone)（MIT）导入 14 条路线、子模块与学习顺序 |
-| **陪练 Coach** | 提交后模板开场 + 短对话；结合图谱位置判断薄弱点；**不泄题、不讲完整解法** |
+| **陪练 Coach** | 打开陪练页时读库组上下文；对话时才调本地 LLM；**不泄题、不讲完整解法** |
 | **陪练页** | `http://127.0.0.1:8763/coach?submission=<id>` 或 `?problem_id=<id>` |
 | **扩展弹窗** | 题目页打开扩展 → 本题建议 +「打开陪练」 |
 | **CLI** | `kg import/status/progress/context`、`coach follow/debrief/chat` |
@@ -69,16 +70,20 @@ leetcode-tracker kg import
 ## Neo 8GB 建议
 
 - 仅追踪：无需 Ollama
-- 陪练：`engage` 开场为**模板**（不调 LLM）；你发送第一条消息后才会调用 7B Q4
+- 陪练：打开陪练页时模板开场（不调 LLM）；你发送第一条消息后才会调用 7B Q4
 - 避免同时跑多个 Ollama 模型；陪练时关闭不必要的 Chrome 标签
 
 ## 说明与限制
 
 - 仅 **leetcode.cn**；无云同步
 - 陪练依赖 `[coach]` extra；未安装时不影响采集与统计
+- **采集与陪练解耦**：`/submit` 只写库；陪练按需读库，扩展提交热路径不调用 engage/LLM
 - 图谱覆盖约 890+ 题；图谱外题目陪练降级为 `problem_stats` 画像
-- 重复提交（`created: false`）**不会**触发陪练 engage
 
 ## 图谱数据来源
 
 路线图文本来自 **algorithm-stone**（MIT License），bundled 于 `leetcode_tracker/data/algorithm_stone/maps/`。详见该目录内 `LICENSE` 与 `README.txt`。
+
+## 维护文档
+
+- [提交采集故障复盘与链路约束](docs/SUBMISSION_CAPTURE_INCIDENT.md)

@@ -104,9 +104,9 @@
 | `GET /api/problems/{id}/llm-context` | LLM 用 Markdown 上下文 |
 | `GET /health` | 含 `port`、`kg_imported`、`coach_available` |
 | `GET /coach` | 陪练 Web 页 |
-| `GET /api/coach/hint` | 按 `problem_id` 或库内 `slug` 返回模板建议（扩展弹窗） |
-| `POST /api/coach/engage` | 模板开场（扩展仅 `created: true` 时触发） |
-| `POST /api/coach/chat` | 多轮陪练（调 Ollama） |
+| `GET /api/coach/hint` | 按 `problem_id` 或库内 `slug` 返回模板建议（扩展弹窗，只读） |
+| `POST /api/coach/engage` | 打开陪练页时按需读库组上下文 + 模板开场（不调 LLM） |
+| `POST /api/coach/chat` | 多轮陪练（调 Ollama；注入 session 内已缓存 context） |
 
 ## CLI
 
