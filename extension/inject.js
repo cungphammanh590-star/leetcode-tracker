@@ -108,6 +108,26 @@
     if (mergedBySlug.problem_id) {
       problemMetaCacheById.set(String(mergedBySlug.problem_id), mergedBySlug);
     }
+    if (mergedBySlug.problem_id || mergedBySlug.slug) {
+      try {
+        window.postMessage(
+          {
+            source: "leetcode-tracker",
+            type: "problem_context",
+            payload: {
+              problem_id: mergedBySlug.problem_id,
+              title: mergedBySlug.title,
+              slug: mergedBySlug.slug,
+              difficulty: mergedBySlug.difficulty,
+              href: String(location.href),
+            },
+          },
+          "*"
+        );
+      } catch {
+        // ignore
+      }
+    }
     return mergedBySlug;
   }
 
@@ -195,7 +215,15 @@
     window.__leetcodeTrackerMetaWatchStarted = true;
 
     const refresh = () => {
-      rememberProblemMeta(extractProblemMeta());
+      const meta = extractProblemMeta();
+      if (
+        meta?.slug &&
+        !meta?.problem_id &&
+        looksLikeRealSlug(meta.slug) &&
+        !difficultyFetchCache.has(meta.slug)
+      ) {
+        void fetchProblemMetaBySlug(meta.slug);
+      }
     };
 
     const observer = new MutationObserver(refresh);

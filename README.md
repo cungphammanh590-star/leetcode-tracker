@@ -1,113 +1,84 @@
 # LeetCode Tracker
 
-完全本地的 **leetcode.cn** 刷题追踪助手（v0.2.0）。  
-在浏览器正常提交后，扩展会把记录写到你的 Mac 上；你在浏览器里就能看统计和每道题的做题情况。**数据不出本机。**
+完全本地的 **leetcode.cn** 刷题追踪助手（v0.3.0）。  
+在浏览器正常提交后，扩展会把记录写到你的 Mac 上；可选 **知识图谱 + 本地陪练** 在每次提交后陪你复盘。**刷题数据不出本机**；陪练默认使用本机 Ollama（可选配置云端 API 占位，MVP 未启用）。
 
 ## 你需要准备什么
 
 - macOS
 - Chrome 或 Edge
 - [leetcode.cn](https://leetcode.cn) 账号（照常刷题即可）
+- **陪练（可选）**：`pip install 'leetcode-tracker[coach]'` + [Ollama](https://ollama.com/) + 量化模型（Neo 8GB 建议 `qwen2.5:7b-instruct-q4_K_M`）
 
 ## 快速开始
 
-从 [Releases](https://github.com/cungphammanh590-star/leetcode-tracker/releases) 下载 `LeetCode-Tracker-macOS-v0.2.0.zip`，解压后会有：
-
-```text
-LeetCode Tracker.app   ← 可选：用来启动本机服务（见下文）
-extension/             ← 浏览器扩展
-使用说明.txt
-```
-
-### 第一步：启动本机服务（推荐方式）
-
-**推荐在终端里启动服务**，然后用浏览器看仪表盘：
-
 ```bash
-# 一次性安装（需要 Python 3.9+）
+# 追踪（核心）
 pip install git+https://github.com/cungphammanh590-star/leetcode-tracker.git
 
-# 每次使用前启动（终端窗口请保持打开）
+# 陪练 + 知识图谱（可选 extra）
+pip install 'leetcode-tracker[coach]'
+
+# 启动本机服务
 leetcode-tracker serve
+
+# 一次性导入学习路线图（algorithm-stone，随包附带）
+leetcode-tracker kg import
 ```
 
-启动成功后，在浏览器打开：**http://127.0.0.1:8763/**
+浏览器打开：**http://127.0.0.1:8763/**
 
-> **关于 App**：zip 里的 `LeetCode Tracker.app` 目前也能启动同样的本机服务。  
-> **后续版本会把 App 做成「启动器」**——主要负责帮你一键拉起服务；日常查看进度仍以**浏览器仪表盘**为主，不再依赖桌面里的独立窗口。
+### 浏览器扩展
 
-**若暂时不想用 pip 安装**：可双击 `LeetCode Tracker.app` 代替 `serve`（若系统拦截：先运行 `xattr -cr "LeetCode Tracker.app"`，再右键 → 打开）。服务起来后，同样用浏览器访问上面的地址。
+1. `chrome://extensions` → 开发者模式 → 加载 `extension/` 文件夹
+2. 在 **leetcode.cn 题目页** 点击扩展图标 → 弹窗顶部显示 **本题陪练建议**（图谱位置 + 模板开场，无需先提交）
+3. 正常提交后，**新提交**会通知「和陪练聊聊」，点击打开本机陪练页；重复提交不会再次 engage
 
-### 第二步：安装浏览器扩展
+若修改了桥接端口（`leetcode-tracker config set port 9000`），扩展会通过 `GET /health` 自动读取 `port` 字段；请重新加载扩展并重启 `serve`。
 
-1. 打开 `chrome://extensions`（Edge 用 `edge://extensions`）
-2. 开启「开发者模式」
-3. 「加载已解压的扩展程序」→ 选择 zip 里的 `extension` 文件夹
-4. 在 `chrome://extensions` 点「重新加载」确保是最新版本
+## v0.3.0 新能力
 
-### 第三步：开刷
-
-1. 打开 [leetcode.cn](https://leetcode.cn) 正常做题、提交
-2. 扩展图标显示 **ok** 或弹出通知，表示已写入本机
-3. 查看进度（任选）：
-   - 浏览器打开 http://127.0.0.1:8763/
-   - 或点击扩展图标 → **打开仪表盘**
-
-## v0.2.0 能看什么
-
-| 页面 | 内容 |
+| 能力 | 说明 |
 |------|------|
-| **仪表盘首页** | 今日提交、连续打卡、近 7 日、今日错题汇总、题目列表 |
-| **题目详情** | 点击任意题目标题进入：终身做题画像、每日情况、每次提交记录 |
-| **今日错题** | 同一道题合并显示，例如 `Compile Error ×3，Wrong Answer ×2` |
+| **知识图谱** | 自 [algorithm-stone](https://github.com/acm-clan/algorithm-stone)（MIT）导入 14 条路线、子模块与学习顺序 |
+| **陪练 Coach** | 提交后模板开场 + 短对话；结合图谱位置判断薄弱点；**不泄题、不讲完整解法** |
+| **陪练页** | `http://127.0.0.1:8763/coach?submission=<id>` 或 `?problem_id=<id>` |
+| **扩展弹窗** | 题目页打开扩展 → 本题建议 +「打开陪练」 |
+| **CLI** | `kg import/status/progress/context`、`coach follow/debrief/chat` |
 
-题目详情地址示例：`http://127.0.0.1:8763/problems/560`
+讲题系统（Tutor）**不在本版本**。
 
-## 数据存在哪里
-
-| 内容 | 路径 | 说明 |
-|------|------|------|
-| **刷题记录** | `~/.local/share/leetcode-tracker/leetcode.db` | 主数据，请勿随意删除 |
-| **配置** | `~/.config/leetcode-tracker/config.json` | 端口等，首次运行自动生成 |
-| **日报（可选）** | `~/leetcode-reports/` | Markdown 快照，删了可重新生成 |
-| **日志（可选）** | `~/Library/Logs/leetcode-tracker*.log` | 排错用 |
-
-仪表盘读的是数据库里的记录，**不依赖** Markdown 日报。
-
-## 常用操作
-
-在**已安装** `leetcode-tracker` 的前提下，终端还可以：
+## 常用命令
 
 | 命令 | 用途 |
 |------|------|
-| `leetcode-tracker serve` | 启动本机服务（**推荐**） |
-| `leetcode-tracker stats` | 在终端看简要统计 |
-| `leetcode-tracker report --today` | 导出今日 Markdown 日报 |
-| `leetcode-tracker app` | 打开桌面窗口（非首选，后续由启动器 App 替代） |
+| `leetcode-tracker serve` | 启动本机服务 |
+| `leetcode-tracker kg import` | 导入 bundled 知识图谱 |
+| `leetcode-tracker kg progress --track dp` | 查看 DP 路线子模块进度 |
+| `leetcode-tracker coach follow <submission_id>` | 模板开场 + session_id |
+| `leetcode-tracker coach chat <submission_id>` | 终端交互陪练（首条消息后调 Ollama） |
+| `leetcode-tracker config set llm.coach_model <name>` | 更换本地模型 |
 
-## 常见问题
+## 数据存在哪里
 
-**扩展显示「离线」**
+| 内容 | 路径 |
+|------|------|
+| **刷题记录 + 图谱 + 陪练会话** | `~/.local/share/leetcode-tracker/leetcode.db` |
+| **配置** | `~/.config/leetcode-tracker/config.json`（含嵌套 `llm` 对象） |
 
-本机服务没在跑。请先执行 `leetcode-tracker serve`（或双击 App），再点扩展里的「重新检测」。
+## Neo 8GB 建议
 
-**仪表盘打不开 / 数据不更新**
-
-1. 确认终端里 `serve` 仍在运行  
-2. 刷新浏览器页面  
-3. 扩展是否已「重新加载」
-
-**今日错题没有汇总、统计是空的**
-
-先确认 `serve` 已启动，刷新仪表盘；若刚从旧版升级，关闭再开一次服务即可（会自动从已有记录恢复汇总）。
-
-**App 闪退**
-
-查看 `~/Library/Logs/leetcode-tracker-app.log`。可改用终端 `leetcode-tracker serve` + 浏览器仪表盘，效果相同。
+- 仅追踪：无需 Ollama
+- 陪练：`engage` 开场为**模板**（不调 LLM）；你发送第一条消息后才会调用 7B Q4
+- 避免同时跑多个 Ollama 模型；陪练时关闭不必要的 Chrome 标签
 
 ## 说明与限制
 
-- 仅支持 **leetcode.cn**（不是 leetcode.com）
-- 无云同步、无账号系统、不内置 AI
-- 未公证的 App 首次需「右键 → 打开」
-- 扩展与 App **无需同版本号**，只要本机服务在线即可通信
+- 仅 **leetcode.cn**；无云同步
+- 陪练依赖 `[coach]` extra；未安装时不影响采集与统计
+- 图谱覆盖约 890+ 题；图谱外题目陪练降级为 `problem_stats` 画像
+- 重复提交（`created: false`）**不会**触发陪练 engage
+
+## 图谱数据来源
+
+路线图文本来自 **algorithm-stone**（MIT License），bundled 于 `leetcode_tracker/data/algorithm_stone/maps/`。详见该目录内 `LICENSE` 与 `README.txt`。

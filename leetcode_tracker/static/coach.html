@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>陪练 · LeetCode Tracker</title>
+  <style>
+    :root {
+      --bg: #f4f1eb;
+      --ink: #1c1917;
+      --muted: #78716c;
+      --card: #fffcf7;
+      --line: #e7e5e4;
+      --accent: #0f766e;
+      --coach: #7c3aed;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Noto Sans SC", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    header {
+      padding: 20px 24px 8px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    h1 { margin: 0; font-size: 22px; }
+    .sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    main { max-width: 720px; margin: 0 auto; padding: 8px 24px 32px; }
+    .banner {
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
+      color: #92400e;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      display: none;
+    }
+    .chat {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      min-height: 360px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .msg {
+      max-width: 92%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .msg.coach {
+      background: #ede9fe;
+      color: #4c1d95;
+      align-self: flex-start;
+    }
+    .msg.user {
+      background: #ccfbf1;
+      color: #134e4a;
+      align-self: flex-end;
+    }
+    .composer {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    input, button {
+      font: inherit;
+    }
+    input {
+      flex: 1;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 16px;
+      background: var(--coach);
+      color: #fff;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>刷题陪练</h1>
+    <p class="sub">苏格拉底式短对话 · 不泄题 · 数据仅在本机</p>
+  </header>
+  <main>
+    <div id="banner" class="banner"></div>
+    <div id="chat" class="chat"></div>
+    <div class="composer">
+      <input id="input" type="text" placeholder="说说你的怀疑点…" disabled />
+      <button id="send" type="button" disabled>发送</button>
+    </div>
+    <p class="sub" style="margin-top:12px">
+      <a href="/">返回仪表盘</a> · 输入「结束」可收束对话
+    </p>
+  </main>
+  <script>
+    const chatEl = document.getElementById("chat");
+    const inputEl = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const bannerEl = document.getElementById("banner");
+
+    const params = new URLSearchParams(location.search);
+    const submission = params.get("submission");
+    const problemId = params.get("problem_id");
+    let sessionId = params.get("session");
+    let busy = false;
+
+    async function loadHint(pid) {
+      const res = await fetch(`/api/coach/hint/${encodeURIComponent(pid)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "hint failed");
+      addMsg(data.suggestion, "coach");
+      if (data.latest_submission_id) {
+        const er = await fetch("/api/coach/engage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ submission_id: data.latest_submission_id }),
+        });
+        const ed = await er.json();
+        if (er.ok && ed.session_id) {
+          sessionId = ed.session_id;
+          inputEl.disabled = false;
+          sendBtn.disabled = false;
+          return;
+        }
+      }
+      showBanner("尚无可用提交记录；在力扣提交后会自动关联最近结果。");
+      inputEl.disabled = true;
+      sendBtn.disabled = true;
+    }
+
+    function addMsg(text, role) {
+      const div = document.createElement("div");
+      div.className = "msg " + role;
+      div.textContent = text;
+      chatEl.appendChild(div);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+    function showBanner(text) {
+      bannerEl.textContent = text;
+      bannerEl.style.display = "block";
+    }
+
+    async function engage() {
+      if (!submission) {
+        showBanner("缺少 submission 参数。请从扩展通知或提交记录链接打开。");
+        return;
+      }
+      const res = await fetch("/api/coach/engage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submission_id: submission }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showBanner(data.message || "无法启动陪练");
+        return;
+      }
+      sessionId = data.session_id;
+      addMsg(data.opening, "coach");
+      inputEl.disabled = false;
+      sendBtn.disabled = false;
+      inputEl.focus();
+    }
+
+    async function sendMessage() {
+      const text = inputEl.value.trim();
+      if (!text || !sessionId || busy) return;
+      busy = true;
+      sendBtn.disabled = true;
+      addMsg(text, "user");
+      inputEl.value = "";
+      try {
+        const res = await fetch("/api/coach/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, message: text }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showBanner(data.message || "发送失败");
+          return;
+        }
+        addMsg(data.reply, "coach");
+        if (data.done) {
+          inputEl.disabled = true;
+          sendBtn.disabled = true;
+        }
+      } finally {
+        busy = false;
+        if (!inputEl.disabled) sendBtn.disabled = false;
+      }
+    }
+
+    sendBtn.addEventListener("click", sendMessage);
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendMessage();
+    });
+
+    (async function init() {
+      try {
+        const health = await fetch("/health").then((r) => r.json());
+        if (!health.coach_available) {
+          showBanner("未安装陪练依赖：pip install 'leetcode-tracker[coach]'");
+          return;
+        }
+        if (!health.kg_imported) {
+          showBanner("知识图谱未导入：leetcode-tracker kg import");
+          return;
+        }
+        if (sessionId) {
+          addMsg("继续会话 " + sessionId, "coach");
+          inputEl.disabled = false;
+          sendBtn.disabled = false;
+          return;
+        }
+        if (submission) {
+          await engage();
+          return;
+        }
+        if (problemId) {
+          await loadHint(problemId);
+          return;
+        }
+        showBanner("缺少 submission 或 problem_id 参数");
+      } catch (err) {
+        showBanner("本机服务不可用，请先运行 leetcode-tracker serve");
+      }
+    })();
+  </script>
+</body>
+</html>

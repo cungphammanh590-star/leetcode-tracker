@@ -9,12 +9,15 @@ import sys
 from leetcode_tracker import __version__
 from leetcode_tracker.app import run_app
 from leetcode_tracker.autostart import clean_logs, install_autostart, uninstall_autostart
-from leetcode_tracker.config import DEFAULTS, load_config, set_config_value
+from leetcode_tracker.config import CONFIG_KEYS, load_config, mask_config_for_display, set_config_value
 from leetcode_tracker.db import init_db
 from leetcode_tracker.paths import db_path
 from leetcode_tracker.problem_stats import ensure_stats_materialized, get_llm_context, rebuild_stats
 from leetcode_tracker.report import clean_reports, write_today_report
 from leetcode_tracker.server import run_server
+from leetcode_tracker.kg_cli import cmd_coach, cmd_kg, register_coach_parser, register_kg_parser
+
+
 from leetcode_tracker.stats import format_stats_text, get_overview
 
 
@@ -58,8 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
     config_sub = config_p.add_subparsers(dest="config_command", required=True)
     config_sub.add_parser("show", help="显示当前配置")
     config_set = config_sub.add_parser("set", help="设置配置项")
-    config_set.add_argument("key", choices=sorted(DEFAULTS.keys()))
+    config_set.add_argument("key")
     config_set.add_argument("value")
+
+    register_kg_parser(sub)
+    register_coach_parser(sub)
 
     auto = sub.add_parser("autostart", help="macOS 开机自启 serve")
     auto_sub = auto.add_subparsers(dest="autostart_command", required=True)
@@ -119,18 +125,22 @@ def cmd_logs(args: argparse.Namespace) -> int:
 
 def cmd_config(args: argparse.Namespace) -> int:
     if args.config_command == "show":
-        cfg = load_config()
+        cfg = mask_config_for_display(load_config())
         payload = dict(cfg)
         payload["db_path_readonly"] = str(db_path())
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.config_command == "set":
+        if args.key not in CONFIG_KEYS:
+            print(f"不支持的配置项: {args.key}", file=sys.stderr)
+            print(f"可用: {', '.join(CONFIG_KEYS)}", file=sys.stderr)
+            return 2
         try:
             cfg = set_config_value(args.key, args.value)
         except ValueError as exc:
             print(str(exc), file=sys.stderr)
             return 2
-        print(json.dumps(cfg, ensure_ascii=False, indent=2))
+        print(json.dumps(mask_config_for_display(cfg), ensure_ascii=False, indent=2))
         return 0
     return 2
 
@@ -187,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
         "app": cmd_app,
         "rebuild-stats": cmd_rebuild_stats,
         "llm-context": cmd_llm_context,
+        "kg": cmd_kg,
+        "coach": cmd_coach,
     }
     handler = dispatch.get(args.command)
     if not handler:

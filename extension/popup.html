@@ -8,11 +8,17 @@
         font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
         margin: 0;
         padding: 12px 14px;
-        width: 280px;
+        width: 320px;
         color: #1a1a1a;
         background: #f7f7f5;
       }
       h1 { font-size: 14px; margin: 0 0 8px; }
+      h2 {
+        font-size: 12px;
+        margin: 14px 0 6px;
+        color: #5b21b6;
+        font-weight: 650;
+      }
       .row {
         display: flex;
         justify-content: space-between;
@@ -22,7 +28,7 @@
       }
       .ok { color: #0a7a3e; font-weight: 600; }
       .bad { color: #b00020; font-weight: 600; }
-      .muted { color: #666; font-size: 11px; line-height: 1.4; margin-top: 10px; }
+      .muted { color: #666; font-size: 11px; line-height: 1.45; }
       code { font-size: 11px; background: #ebeae6; padding: 1px 4px; border-radius: 3px; }
       button {
         width: 100%;
@@ -35,6 +41,9 @@
         font-size: 12px;
         cursor: pointer;
       }
+      button.coach {
+        background: #7c3aed;
+      }
       button.secondary {
         background: #e7e5e4;
         color: #44403c;
@@ -45,17 +54,37 @@
         cursor: not-allowed;
       }
       #last { margin-top: 8px; font-size: 11px; word-break: break-word; }
+      .coach-card {
+        background: #faf5ff;
+        border: 1px solid #e9d5ff;
+        border-radius: 8px;
+        padding: 10px;
+        margin-top: 4px;
+      }
+      #coach-suggestion {
+        font-size: 12px;
+        line-height: 1.5;
+        color: #3b0764;
+        white-space: pre-wrap;
+      }
+      #coach-meta { margin-top: 6px; font-size: 11px; color: #6b7280; }
     </style>
   </head>
   <body>
     <h1>LeetCode Tracker</h1>
     <div class="row"><span>本机桥接</span><span id="bridge">检测中…</span></div>
     <div class="row"><span>库内提交数</span><span id="count">—</span></div>
+
+    <h2>本题陪练建议</h2>
+    <div class="coach-card">
+      <div id="coach-title" class="muted">检测当前题目…</div>
+      <div id="coach-suggestion" class="muted">—</div>
+      <div id="coach-meta"></div>
+    </div>
+    <button id="open-coach" class="coach" type="button" disabled>打开陪练</button>
+    <button id="open-problem" class="secondary" type="button" disabled>题目详情</button>
+
     <div id="last" class="muted">最近一次：尚无记录</div>
-    <p class="muted">
-      仅支持 <code>leetcode.cn</code>。请先打开本机 App 或运行
-      <code>leetcode-tracker serve</code>，再在题目页提交。
-    </p>
     <button id="open-dashboard" type="button" disabled>打开仪表盘</button>
     <button id="refresh" class="secondary" type="button">重新检测</button>
     <script src="popup.js"></script>

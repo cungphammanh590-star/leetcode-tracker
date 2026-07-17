@@ -75,6 +75,47 @@ CREATE TABLE IF NOT EXISTS problem_daily_stats (
 );
 
 CREATE INDEX IF NOT EXISTS idx_problem_daily_day ON problem_daily_stats(day);
+
+CREATE TABLE IF NOT EXISTS kg_tracks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source TEXT DEFAULT 'algorithm-stone',
+    problem_count INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS kg_nodes (
+    id TEXT PRIMARY KEY,
+    track_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    FOREIGN KEY (track_id) REFERENCES kg_tracks(id)
+);
+
+CREATE TABLE IF NOT EXISTS kg_node_problems (
+    node_id TEXT NOT NULL,
+    problem_id INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL,
+    annotation TEXT,
+    PRIMARY KEY (node_id, problem_id),
+    FOREIGN KEY (node_id) REFERENCES kg_nodes(id)
+);
+
+CREATE TABLE IF NOT EXISTS kg_edges (
+    from_problem_id INTEGER NOT NULL,
+    to_problem_id INTEGER NOT NULL,
+    node_id TEXT NOT NULL,
+    PRIMARY KEY (from_problem_id, to_problem_id, node_id),
+    FOREIGN KEY (node_id) REFERENCES kg_nodes(id)
+);
+
+CREATE TABLE IF NOT EXISTS kg_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_kg_node_problems_pid ON kg_node_problems(problem_id);
+CREATE INDEX IF NOT EXISTS idx_kg_edges_from ON kg_edges(from_problem_id);
 """
 
 
