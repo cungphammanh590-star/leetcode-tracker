@@ -1,21 +1,38 @@
-"""陪练会话服务：与采集解耦。
+"""陪练会话服务：模板即时启动，LangGraph 管理多轮状态。"""
 
-engage：用户打开陪练页时按需读库组上下文（模板开场，不调 LLM）。
-chat：用户开口后才加载 LangGraph，并将 session 内已缓存的 context 注入模型。
-"""
+from __future__ import annotations
 
 import sqlite3
-from functools import lru_cache
-from typing import Annotated, Any, TypedDict
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Annotated, Any, Optional
+
+from langchain_core.messages import AnyMessage
+from langgraph.graph import MessagesState
+from langgraph.graph.message import add_messages
 
 from leetcode_tracker.coach.context import build_coach_context
 from leetcode_tracker.coach.opening import template_opening
 from leetcode_tracker.coach.prompts import COACH_SYSTEM_PROMPT
-from leetcode_tracker.coach.sessions import create_session, get_session, touch_session
+from leetcode_tracker.coach.sessions import get_or_create_session, get_session, touch_session
 from leetcode_tracker.llm.provider import build_chat_model
 from leetcode_tracker.paths import db_path
 
 _END_PHRASES = ("结束", "够了", "先这样", "不用了", "谢谢")
+_SESSION_LOCKS: dict[str, threading.Lock] = {}
+_SESSION_LOCKS_GUARD = threading.Lock()
+
+
+class CoachState(MessagesState):
+    context_markdown: str
+    done: bool
+    fallback_turn_count: int
+    generation_error: str
+
+
+class GenerationCancelled(Exception):
+    """客户端断开后停止消费模型流。"""
 
 
 def _is_done_message(text: str) -> bool:
@@ -23,102 +40,305 @@ def _is_done_message(text: str) -> bool:
     return any(p in t for p in _END_PHRASES)
 
 
-def engage(conn: sqlite3.Connection, submission_id: str) -> dict[str, Any]:
-    """按 submission 读库拼上下文 + 模板开场。不写 submissions，不阻塞采集。"""
-    ctx = build_coach_context(conn, submission_id)
-    placement = ctx.get("placement")
+def _fallback_reply(turn: int) -> str:
+    replies = (
+        "模型暂时不可用，我们先不看答案。你能说出这次最小的失败用例，以及实际结果和预期结果分别是什么吗？",
+        "先沿着你的思路排查：你认为哪个不变量应该始终成立？请挑一次循环或一次递归调用验证它。",
+        "把问题再缩小一点：边界、状态转移和数据范围中，你现在最不确定哪一项？",
+        "暂时不用改代码。请先用一句话说明当前做法为什么应该成立，再找一个能推翻这句话的输入。",
+    )
+    return replies[max(0, turn) % len(replies)]
+
+
+def _session_lock(session_id: str) -> threading.Lock:
+    with _SESSION_LOCKS_GUARD:
+        return _SESSION_LOCKS.setdefault(session_id, threading.Lock())
+
+
+def try_acquire_session(session_id: str) -> bool:
+    return _session_lock(session_id).acquire(blocking=False)
+
+
+def release_session(session_id: str) -> None:
+    lock = _session_lock(session_id)
+    if lock.locked():
+        lock.release()
+
+
+@contextmanager
+def _graph_for_turn(cancel_event: threading.Event):
+    from langchain_core.messages import AIMessage, SystemMessage
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    from langgraph.config import get_stream_writer
+    from langgraph.graph import END, START, StateGraph
+
+    def route_turn(state: CoachState) -> str:
+        if bool(state.get("done")):
+            return "close_session"
+        messages = list(state.get("messages") or [])
+        last = messages[-1] if messages else None
+        content = str(getattr(last, "content", "") or "")
+        return "close_session" if _is_done_message(content) else "coach_reply"
+
+    def close_session(_state: CoachState) -> dict[str, Any]:
+        summary = (
+            "好的，今天先到这里。记得把刚才怀疑的点记下来，"
+            "下次提交前再对一遍。"
+        )
+        get_stream_writer()({"type": "token", "text": summary})
+        return {"messages": [AIMessage(content=summary)], "done": True}
+
+    def coach_reply(state: CoachState) -> dict[str, Any]:
+        writer = get_stream_writer()
+        context_markdown = str(state.get("context_markdown") or "")
+        system = SystemMessage(
+            content=f"{COACH_SYSTEM_PROMPT}\n\n## 陪练上下文\n{context_markdown}"
+        )
+        accumulated = ""
+        fallback_turn = int(state.get("fallback_turn_count") or 0)
+        try:
+            model = build_chat_model()
+            for chunk in model.stream([system, *list(state.get("messages") or [])]):
+                if cancel_event.is_set():
+                    raise GenerationCancelled()
+                piece = getattr(chunk, "content", None)
+                if not piece:
+                    continue
+                text = piece if isinstance(piece, str) else str(piece)
+                if not text:
+                    continue
+                accumulated += text
+                writer({"type": "token", "text": text})
+            if not accumulated:
+                raise RuntimeError("模型未返回内容")
+            return {
+                "messages": [AIMessage(content=accumulated)],
+                "done": False,
+                "fallback_turn_count": fallback_turn,
+                "generation_error": "",
+            }
+        except GenerationCancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "done": False,
+                "fallback_turn_count": fallback_turn,
+                "generation_error": str(exc),
+            }
+
+    def route_after_reply(state: CoachState) -> str:
+        return "fallback_reply" if state.get("generation_error") else "__end__"
+
+    def fallback_reply(state: CoachState) -> dict[str, Any]:
+        fallback_turn = int(state.get("fallback_turn_count") or 0)
+        reply = _fallback_reply(fallback_turn)
+        get_stream_writer()(
+            {
+                "type": "fallback",
+                "text": reply,
+                "message": (
+                    "模型不可用，已切换本地降级陪练："
+                    f"{state.get('generation_error') or 'unknown error'}"
+                ),
+            }
+        )
+        return {
+            "messages": [AIMessage(content=reply)],
+            "done": False,
+            "fallback_turn_count": fallback_turn + 1,
+            "generation_error": "",
+        }
+
+    builder = StateGraph(CoachState)
+    builder.add_node("coach_reply", coach_reply)
+    builder.add_node("close_session", close_session)
+    builder.add_node("fallback_reply", fallback_reply)
+    builder.add_conditional_edges(
+        START,
+        route_turn,
+        {
+            "coach_reply": "coach_reply",
+            "close_session": "close_session",
+        },
+    )
+    builder.add_conditional_edges(
+        "coach_reply",
+        route_after_reply,
+        {
+            "fallback_reply": "fallback_reply",
+            "__end__": END,
+        },
+    )
+    builder.add_edge("fallback_reply", END)
+    builder.add_edge("close_session", END)
+
+    checkpoint_conn = sqlite3.connect(
+        str(db_path()), check_same_thread=False, timeout=5.0
+    )
+    checkpoint_conn.execute("PRAGMA busy_timeout = 5000")
+    try:
+        graph = builder.compile(checkpointer=SqliteSaver(checkpoint_conn))
+        yield graph
+    finally:
+        checkpoint_conn.close()
+
+
+def _session_payload(
+    session: dict[str, Any],
+    *,
+    opening_source: str,
+    reused: bool,
+    requested_submission_id: str,
+    resolved_submission_id: str,
+    fallback_used: bool,
+    context_preview: str = "",
+) -> dict[str, Any]:
+    return {
+        "session_id": session["session_id"],
+        "opening": session["opening"],
+        "problem_id": session["problem_id"],
+        "submission_id": session["submission_id"],
+        "requested_submission_id": requested_submission_id,
+        "resolved_submission_id": resolved_submission_id,
+        "fallback_used": fallback_used,
+        "opening_source": opening_source,
+        "reused": reused,
+        "context_preview": context_preview
+        or str(session.get("context_markdown") or "")[:400],
+    }
+
+
+def prepare(
+    conn: sqlite3.Connection,
+    submission_id: str = "",
+    *,
+    problem_id: Optional[int] = None,
+    reuse_existing: bool = True,  # noqa: ARG001 - 保留 CLI/API 兼容参数
+) -> dict[str, Any]:
+    """只读提交事实并原子创建模板会话；绝不调用 LLM。"""
+    ctx = build_coach_context(conn, submission_id, problem_id=problem_id)
     opening = template_opening(
         problem_id=int(ctx["problem_id"]),
         title=str(ctx["title"]),
         status=str(ctx["status"]),
-        placement=placement,
+        placement=ctx.get("placement"),
         today_count=int(ctx["today_count"]),
     )
-    session = create_session(
+    session, created = get_or_create_session(
         conn,
-        submission_id=submission_id,
+        submission_id=str(ctx["resolved_submission_id"]),
         problem_id=int(ctx["problem_id"]),
         opening=opening,
         context_markdown=str(ctx["markdown"]),
     )
-    return {
-        "session_id": session["session_id"],
-        "opening": opening,
-        "problem_id": session["problem_id"],
-        "submission_id": submission_id,
-        "context_preview": str(ctx["markdown"])[:400],
-    }
-
-
-@lru_cache(maxsize=1)
-def _compiled_graph():
-    from langchain_core.messages import SystemMessage
-    from langgraph.checkpoint.sqlite import SqliteSaver
-    from langgraph.graph import END, StateGraph
-    from langgraph.graph.message import add_messages
-
-    class CoachState(TypedDict):
-        messages: Annotated[list, add_messages]
-        context_markdown: str
-
-    def coach_reply_node(state: CoachState) -> dict[str, Any]:
-        model = build_chat_model()
-        system = SystemMessage(
-            content=f"{COACH_SYSTEM_PROMPT}\n\n## 陪练上下文\n{state['context_markdown']}"
-        )
-        response = model.invoke([system, *state["messages"]])
-        return {"messages": [response]}
-
-    builder = StateGraph(CoachState)
-    builder.add_node("coach_reply", coach_reply_node)
-    builder.set_entry_point("coach_reply")
-    builder.add_edge("coach_reply", END)
-    # from_conn_string 是 contextmanager；缓存编译图需要长生命周期连接
-    ckpt_conn = sqlite3.connect(str(db_path()), check_same_thread=False)
-    checkpointer = SqliteSaver(ckpt_conn)
-    return builder.compile(checkpointer=checkpointer)
+    return _session_payload(
+        session,
+        opening_source="template" if created else "cached",
+        reused=not created,
+        requested_submission_id=str(ctx["requested_submission_id"]),
+        resolved_submission_id=str(ctx["resolved_submission_id"]),
+        fallback_used=bool(ctx["fallback_used"]),
+        context_preview=str(ctx["markdown"])[:400],
+    )
 
 
 def chat(
     conn: sqlite3.Connection, session_id: str, message: str
 ) -> dict[str, Any]:
+    """同步续聊（CLI 使用）。Web 优先走 chat_stream / SSE。"""
+    chunks: list[str] = []
+    done = False
+    for event in chat_stream(conn, session_id, message):
+        if event.get("type") in {"token", "fallback"}:
+            chunks.append(str(event.get("text") or ""))
+        elif event.get("type") == "done":
+            done = bool(event.get("done"))
+            if event.get("reply") and not chunks:
+                chunks.append(str(event["reply"]))
+        elif event.get("type") == "error":
+            raise RuntimeError(str(event.get("message") or "chat failed"))
+    return {"reply": "".join(chunks), "done": done}
+
+
+def chat_stream(
+    conn: sqlite3.Connection,
+    session_id: str,
+    message: str,
+    *,
+    cancel_event: Optional[threading.Event] = None,
+    lock_acquired: bool = False,
+) -> Iterator[dict[str, Any]]:
+    """由 LangGraph 执行单回合并输出 ready/token/fallback/done/error。"""
     from langchain_core.messages import AIMessage, HumanMessage
 
     session = get_session(conn, session_id)
     if session is None:
-        raise ValueError(f"未找到会话: {session_id}")
+        yield {"type": "error", "message": f"未找到会话: {session_id}"}
+        return
 
-    if _is_done_message(message):
-        summary = (
-            "好的，今天先到这里。记得把刚才怀疑的点记下来，下次提交前再对一遍。"
-        )
+    owns_lock = not lock_acquired
+    if owns_lock and not try_acquire_session(session_id):
+        yield {
+            "type": "error",
+            "code": "session_busy",
+            "message": "该会话正在处理上一条消息",
+        }
+        return
+
+    stop = cancel_event or threading.Event()
+    reply_parts: list[str] = []
+    done = False
+    try:
+        yield {"type": "ready", "session_id": session_id}
+        with _graph_for_turn(stop) as graph:
+            config = {"configurable": {"thread_id": session["thread_id"]}}
+            snapshot = graph.get_state(config)
+            has_messages = bool(
+                snapshot and snapshot.values and snapshot.values.get("messages")
+            )
+            messages: list[Any] = [HumanMessage(content=message)]
+            if not has_messages:
+                messages.insert(0, AIMessage(content=str(session["opening"])))
+            graph_input = {
+                "messages": messages,
+                "context_markdown": str(session.get("context_markdown") or ""),
+                "done": bool(
+                    snapshot.values.get("done")
+                    if snapshot and snapshot.values
+                    else False
+                ),
+                "fallback_turn_count": int(
+                    snapshot.values.get("fallback_turn_count") or 0
+                    if snapshot and snapshot.values
+                    else 0
+                ),
+                "generation_error": "",
+            }
+            for mode, data in graph.stream(
+                graph_input,
+                config,
+                stream_mode=["custom", "updates"],
+            ):
+                if stop.is_set():
+                    raise GenerationCancelled()
+                if mode != "custom" or not isinstance(data, dict):
+                    continue
+                event = dict(data)
+                if event.get("type") in {"token", "fallback"}:
+                    reply_parts.append(str(event.get("text") or ""))
+                yield event
+            final_snapshot = graph.get_state(config)
+            done = bool(
+                final_snapshot.values.get("done")
+                if final_snapshot and final_snapshot.values
+                else False
+            )
         touch_session(conn, session_id)
-        return {"reply": summary, "done": True}
-
-    graph = _compiled_graph()
-    config = {"configurable": {"thread_id": session["thread_id"]}}
-    result = graph.invoke(
-        {
-            "messages": [HumanMessage(content=message)],
-            "context_markdown": session["context_markdown"] or "",
-        },
-        config=config,
-    )
-    touch_session(conn, session_id)
-    last = result["messages"][-1]
-    reply = last.content if isinstance(last, AIMessage) else str(last)
-    return {"reply": reply, "done": False}
-
-
-def debrief_today(conn: sqlite3.Connection) -> str:
-    from leetcode_tracker.stats import get_overview
-
-    stats = get_overview(conn)
-    wrong_n = len(stats.today_wrong)
-    if stats.today_submissions == 0:
-        return "今天还没有提交记录。刷一题后我可以帮你复盘。"
-    return (
-        f"今天共 {stats.today_submissions} 次提交，通过 {stats.today_accepted} 次，"
-        f"错题 {wrong_n} 道，连续打卡 {stats.streak_days} 天。"
-        "想从哪道题开始聊？输入题号或说「今日错题」。"
-    )
+        yield {"type": "done", "done": done, "reply": "".join(reply_parts)}
+    except GenerationCancelled:
+        return
+    except Exception as exc:  # noqa: BLE001
+        yield {"type": "error", "message": str(exc)}
+    finally:
+        if owns_lock:
+            release_session(session_id)

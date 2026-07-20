@@ -4,11 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "leetcode-tracker"
-version = "0.3.0"
+version = "0.3.1"
 description = "Fully local LeetCode CN practice tracker with optional AI coach"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
 
 [project.optional-dependencies]
 app = ["pywebview>=5.0"]
@@ -18,7 +21,7 @@ coach = [
     "langchain-ollama>=0.2",
     "langgraph-checkpoint-sqlite>=2.0",
 ]
-packaging = ["pyinstaller>=6.0", "pywebview>=5.0"]
+packaging = ["pyinstaller>=6.0", "pywebview>=5.0", "fastapi>=0.115", "uvicorn[standard]>=0.30"]
 
 [project.scripts]
 leetcode-tracker = "leetcode_tracker.cli:main"

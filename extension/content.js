@@ -3,8 +3,20 @@
 
   function relay(data) {
     try {
-      // v0.2 经过实际使用验证的路径：只转发，不等待 background 回包。
-      chrome.runtime.sendMessage(data);
+      // 必须带 response callback：否则 MV3 SW 可能在 /submit 完成前休眠，
+      // 表现为 emit/relay 有日志但库无记录。仍只走单次 sendMessage，无双队列。
+      chrome.runtime.sendMessage(data, (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn(
+            "[leetcode-tracker] relay lastError:",
+            chrome.runtime.lastError.message
+          );
+          return;
+        }
+        if (response && response.ok === false) {
+          console.warn("[leetcode-tracker] relay nack:", response.error || response);
+        }
+      });
     } catch (err) {
       console.warn("[leetcode-tracker] relay exception:", err);
     }

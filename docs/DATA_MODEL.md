@@ -85,8 +85,12 @@
 
 | 表 | 说明 |
 |----|------|
-| `coach_sessions` | session 元数据、模板 opening、context Markdown |
-| LangGraph checkpoint 表 | 与 `leetcode.db` 同文件，存多轮对话状态 |
+| `coach_sessions` | session 元数据、确定性模板 `opening`、`context_markdown`、`thread_id`；同 submission 原子创建/复用一个规范会话 |
+| LangGraph checkpoint 表 | 与 `leetcode.db` 同文件，存用户发消息后的图内路由、流式模型与完整轮次状态（与 `thread_id` 对齐） |
+
+`prepare` 只读取已入库 submission 与派生数据，不调用模型。请求可指定 `submission_id`；仅显式提供 `problem_id` 时，选择该题 `submitted_at` 最新的 submission（时间平局使用稳定键），无提交则返回明确错误。重复或并发 prepare 必须返回同一规范 `session_id`。
+
+详细链路见 [COACH_LANGGRAPH.md](COACH_LANGGRAPH.md)。
 
 ## 写入时机
 
@@ -102,11 +106,15 @@
 | `GET /api/stats` | 仪表盘；`today_wrong` 来自 `problem_daily_stats` |
 | `GET /api/problems/{id}/stats` | 单题终身 + 近 7 日每日快照 |
 | `GET /api/problems/{id}/llm-context` | LLM 用 Markdown 上下文 |
-| `GET /health` | 含 `port`、`kg_imported`、`coach_available` |
+| `GET /health` | 含 `server`（应为 `fastapi`）、`port`、`kg_imported`、`coach_available` |
 | `GET /coach` | 陪练 Web 页 |
-| `GET /api/coach/hint` | 按 `problem_id` 或库内 `slug` 返回模板建议（扩展弹窗，只读） |
-| `POST /api/coach/engage` | 打开陪练页时按需读库组上下文 + 模板开场（不调 LLM） |
-| `POST /api/coach/chat` | 多轮陪练（调 Ollama；注入 session 内已缓存 context） |
+| `POST /submit` | **仅入库**；响应不含 prepare/LLM 字段 |
+| `POST /api/coach/prepare` | 入库后独立调用：按 `submission_id` 或显式 `problem_id` 最新提交，原子创建/复用模板会话；不调用 LLM |
+| `POST /api/coach/stream` | SSE 多轮续聊（`session_id` + `message`）；首条用户消息才首次调用模型，LangGraph 负责路由/token/checkpoint/结束/fallback |
+| `GET /api/coach/session` | 按 `submission_id` 取最近 prepare 会话（只读） |
+| `GET /api/coach/hint` | 按 `problem_id` / `slug` 模板建议（扩展弹窗，只读） |
+| `POST /api/coach/engage` | 兼容入口：不得绕过无 LLM prepare 契约 |
+| `POST /api/coach/chat` | 兼容：同步整段回复（CLI）；Web 优先 `stream` |
 
 ## CLI
 
@@ -116,4 +124,4 @@
 | `leetcode-tracker llm-context 560` | 打印单题 LLM 上下文 |
 | `leetcode-tracker kg import` | 导入知识图谱 |
 | `leetcode-tracker kg progress --track dp` | 路线进度 |
-| `leetcode-tracker coach follow <submission_id>` | 陪练开场 |
+| `leetcode-tracker coach follow <submission_id>` | prepare 模板开场（不调用 LLM） |

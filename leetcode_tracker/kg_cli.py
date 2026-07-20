@@ -86,14 +86,20 @@ def cmd_coach(args: argparse.Namespace) -> int:
             print(coach_service.debrief_today(conn))
             return 0
         if args.coach_command == "follow":
-            result = coach_service.engage(conn, args.submission_id)
+            # prepare 只建模板会话；模型在用户发送消息时调用。
+            result = coach_service.prepare(conn, args.submission_id)
             print(result["opening"])
-            print(f"\n[session_id={result['session_id']}]")
+            src = result.get("opening_source") or "?"
+            print(f"\n[session_id={result['session_id']} opening_source={src}]")
             return 0
         if args.coach_command == "chat":
-            result = coach_service.engage(conn, args.submission_id)
+            # 同步 chat 复用 LangGraph 流；Web 页走 SSE /api/coach/stream。
+            result = coach_service.prepare(conn, args.submission_id)
             print(result["opening"])
-            print(f"\n[session_id={result['session_id']}] 输入消息，空行或 Ctrl-D 结束。\n")
+            print(
+                f"\n[session_id={result['session_id']}] "
+                "输入消息，空行或 Ctrl-D 结束。（CLI 同步；浏览器走 SSE）\n"
+            )
             session_id = result["session_id"]
             while True:
                 try:

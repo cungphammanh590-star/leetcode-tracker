@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from leetcode_tracker.config import load_config
+
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_TIMEOUT_SECONDS = 45.0
 
 
 def get_llm_settings() -> dict[str, str]:
@@ -34,12 +35,13 @@ def build_chat_model():
     return ChatOllama(
         model=settings["coach_model"],
         temperature=0.4,
+        base_url=OLLAMA_BASE_URL,
+        client_kwargs={
+            "timeout": OLLAMA_TIMEOUT_SECONDS,
+            "trust_env": False,
+        },
+        async_client_kwargs={
+            "timeout": OLLAMA_TIMEOUT_SECONDS,
+            "trust_env": False,
+        },
     )
-
-
-def probe_ollama_available() -> tuple[bool, str]:
-    try:
-        build_chat_model()
-        return True, ""
-    except Exception as exc:  # noqa: BLE001
-        return False, str(exc)

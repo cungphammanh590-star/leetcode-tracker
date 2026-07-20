@@ -194,7 +194,11 @@ coachBtn.addEventListener("click", async () => {
   if (!bridgeOnline || !coachHint) return;
   let url = `${bridgeBase}/coach`;
   if (coachHint.latest_submission_id) {
-    url += `?submission=${encodeURIComponent(coachHint.latest_submission_id)}`;
+    const params = new URLSearchParams({
+      submission: String(coachHint.latest_submission_id),
+      problem_id: String(coachHint.problem_id),
+    });
+    url += `?${params.toString()}`;
   } else if (coachHint.problem_id) {
     url += `?problem_id=${encodeURIComponent(String(coachHint.problem_id))}`;
   }

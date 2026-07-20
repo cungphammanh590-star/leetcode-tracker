@@ -122,9 +122,11 @@ CREATE INDEX IF NOT EXISTS idx_kg_edges_from ON kg_edges(from_problem_id);
 def connect(path: Path | None = None) -> sqlite3.Connection:
     target = path or db_path()
     ensure_parent(target)
-    conn = sqlite3.connect(str(target))
+    conn = sqlite3.connect(str(target), timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 

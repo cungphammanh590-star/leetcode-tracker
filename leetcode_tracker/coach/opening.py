@@ -1,4 +1,4 @@
-"""陪练开场白模板（engage 不调 LLM）。"""
+"""陪练开场白模板（LLM 不可用时的降级首句）。"""
 
 from __future__ import annotations
 
