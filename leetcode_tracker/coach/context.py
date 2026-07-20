@@ -12,6 +12,73 @@ from leetcode_tracker.submissions import (
     get_submission_by_id,
 )
 
+_STATUS_HINTS = {
+    "Accepted": (
+        "✅ 已通过：进入「重构顾问」模式。"
+        "只谈可读性/复杂度/常数项；禁止找逻辑错误；禁止给完整重构代码。"
+        "用户若问更好写法，先问清是更快、更短还是更易读。"
+    ),
+    "Wrong Answer": (
+        "⚠️ 逻辑错误：重点关注循环边界、变量更新顺序、哈希表覆盖、返回值是否正确。"
+    ),
+    "Runtime Error": (
+        "⚠️ 运行时错误：重点关注数组越界（i+1）、空指针（None/null）、递归栈溢出。"
+    ),
+    "Time Limit Exceeded": (
+        "⚠️ 超时：重点关注是否有不必要的嵌套循环、是否可以提前剪枝。"
+    ),
+    "Compile Error": (
+        "⚠️ 编译错误：重点关注语法、类型、未定义变量、括号/缩进是否匹配。"
+    ),
+}
+
+
+def _format_runtime(runtime_ms: Any) -> str:
+    if runtime_ms is None:
+        return "—"
+    try:
+        return f"{int(runtime_ms)} ms"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _format_memory(memory_mb: Any) -> str:
+    if memory_mb is None:
+        return "—"
+    try:
+        return f"{float(memory_mb):g} MB"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _code_snippet(code: Optional[str], *, max_lines: int = 30) -> str:
+    if not code:
+        return ""
+    lines = code.splitlines()
+    snippet = "\n".join(lines[:max_lines])
+    if len(lines) > max_lines:
+        snippet += "\n... (后续代码省略)"
+    return snippet
+
+
+def _status_flow(
+    conn: sqlite3.Connection, problem_id: int, *, limit: int = 5
+) -> str:
+    rows = conn.execute(
+        """
+        SELECT status
+        FROM submissions
+        WHERE problem_id = ?
+        ORDER BY submitted_at DESC, id DESC
+        LIMIT ?
+        """,
+        (problem_id, limit),
+    ).fetchall()
+    if not rows:
+        return "无历史"
+    # 查询为新→旧，展示时翻成旧→新
+    return " -> ".join(row["status"] for row in reversed(rows))
+
 
 def _recent_attempts_markdown(
     conn: sqlite3.Connection, problem_id: int, *, limit: int = 5
@@ -63,18 +130,32 @@ def build_coach_context(
     today_count = count_today_attempts_for_problem(conn, resolved_problem_id)
     kg_md, placement = format_kg_context_markdown(conn, resolved_problem_id)
 
-    runtime = (
-        f"{sub['runtime_ms']}ms" if sub.get("runtime_ms") is not None else "—"
-    )
     title = sub.get("title") or f"Problem {resolved_problem_id}"
     difficulty = sub.get("difficulty") or "—"
+    language = sub.get("language") or "text"
+    status = str(sub["status"])
+    code_snippet = _code_snippet(sub.get("code"))
+    status_flow = _status_flow(conn, resolved_problem_id)
+    status_hint = _STATUS_HINTS.get(status, "")
+    runtime = _format_runtime(sub.get("runtime_ms"))
+    memory = _format_memory(sub.get("memory_mb"))
 
-    submission_md = f"""## 本次提交
+    fence_lang = str(language).lower()
+    submission_md = f"""## 本次提交现场
 - 题目：{resolved_problem_id}. {title}（{difficulty}）
-- 状态：{sub['status']}
+- 当前状态：**{status}**
 - 语言：{sub.get('language') or '—'}
-- 用时：{runtime}
-- 今日该题第 {today_count} 次提交
+- 运行用时：{runtime}（击败百分比以力扣页面为准，此处不编造）
+- 内存消耗：{memory}
+- 今日该题已尝试：{today_count} 次
+- 该题最近状态流（从旧到新）：{status_flow}
+
+{status_hint}
+
+## 用户当前代码（仅展示核心逻辑前 30 行）
+```{fence_lang}
+{code_snippet or '（代码未入库，无法展示）'}
+```
 """
     recent_md = _recent_attempts_markdown(conn, resolved_problem_id)
     markdown = "\n".join(part for part in (submission_md, recent_md, kg_md) if part)
@@ -85,7 +166,7 @@ def build_coach_context(
         "resolved_submission_id": resolved_submission_id,
         "fallback_used": fallback_used,
         "problem_id": resolved_problem_id,
-        "status": sub["status"],
+        "status": status,
         "title": title,
         "difficulty": difficulty,
         "markdown": markdown,

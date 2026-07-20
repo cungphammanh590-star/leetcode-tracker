@@ -17,12 +17,21 @@ def ensure_coach_session_schema(conn: sqlite3.Connection) -> None:
             problem_id INTEGER NOT NULL,
             opening TEXT NOT NULL,
             context_markdown TEXT,
+            submission_status TEXT,
             thread_id TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
         """
     )
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(coach_sessions)").fetchall()
+    }
+    if "submission_status" not in columns:
+        conn.execute(
+            "ALTER TABLE coach_sessions ADD COLUMN submission_status TEXT"
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_coach_sessions_submission ON coach_sessions(submission_id)"
     )
@@ -36,6 +45,7 @@ def create_session(
     problem_id: int,
     opening: str,
     context_markdown: str,
+    submission_status: str = "",
 ) -> dict[str, Any]:
     ensure_coach_session_schema(conn)
     session_id = str(uuid.uuid4())
@@ -44,8 +54,8 @@ def create_session(
         """
         INSERT INTO coach_sessions (
             session_id, submission_id, problem_id, opening,
-            context_markdown, thread_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            context_markdown, submission_status, thread_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             session_id,
@@ -53,6 +63,7 @@ def create_session(
             problem_id,
             opening,
             context_markdown,
+            submission_status,
             session_id,
             now,
             now,
@@ -64,8 +75,11 @@ def create_session(
         "submission_id": submission_id,
         "problem_id": problem_id,
         "opening": opening,
+        "context_markdown": context_markdown,
+        "submission_status": submission_status,
         "thread_id": session_id,
         "created_at": now,
+        "updated_at": now,
     }
 
 
@@ -76,6 +90,7 @@ def get_or_create_session(
     problem_id: int,
     opening: str,
     context_markdown: str,
+    submission_status: str = "",
 ) -> tuple[dict[str, Any], bool]:
     """原子获取或创建提交级会话；返回 (session, created)。"""
     ensure_coach_session_schema(conn)
@@ -91,8 +106,30 @@ def get_or_create_session(
             (submission_id,),
         ).fetchone()
         if row:
+            # 复用时刷新 context / status / opening，避免升级后仍吃旧缓存
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """
+                UPDATE coach_sessions
+                SET context_markdown = ?, submission_status = ?,
+                    opening = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (
+                    context_markdown,
+                    submission_status,
+                    opening,
+                    now,
+                    row["session_id"],
+                ),
+            )
             conn.commit()
-            return dict(row), False
+            reused = dict(row)
+            reused["context_markdown"] = context_markdown
+            reused["submission_status"] = submission_status
+            reused["opening"] = opening
+            reused["updated_at"] = now
+            return reused, False
 
         session_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
@@ -100,8 +137,9 @@ def get_or_create_session(
             """
             INSERT INTO coach_sessions (
                 session_id, submission_id, problem_id, opening,
-                context_markdown, thread_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                context_markdown, submission_status, thread_id,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -109,6 +147,7 @@ def get_or_create_session(
                 problem_id,
                 opening,
                 context_markdown,
+                submission_status,
                 session_id,
                 now,
                 now,
@@ -121,6 +160,7 @@ def get_or_create_session(
             "problem_id": problem_id,
             "opening": opening,
             "context_markdown": context_markdown,
+            "submission_status": submission_status,
             "thread_id": session_id,
             "created_at": now,
             "updated_at": now,

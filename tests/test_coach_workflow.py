@@ -29,6 +29,7 @@ def _seed_db(path: Path) -> None:
                 "difficulty": "Medium",
                 "status": "Wrong Answer",
                 "language": "java",
+                "code": "class Solution {\n  public int maxSubArray(int[] nums) {\n    return nums[0];\n  }\n}\n",
             },
         )
         save_submission(
@@ -41,6 +42,7 @@ def _seed_db(path: Path) -> None:
                 "difficulty": "Medium",
                 "status": "Accepted",
                 "language": "java",
+                "code": "class Solution {\n  public int maxSubArray(int[] nums) {\n    int best = nums[0];\n    return best;\n  }\n}\n",
             },
         )
     finally:
@@ -73,6 +75,184 @@ def test_prepare_is_template_first_and_does_not_build_model(
     assert result["reused"] is False
     assert result["resolved_submission_id"] == "sub-53-new"
     assert result["opening"]
+    assert "maxSubArray" in result["context_preview"]
+    assert "Wrong Answer -> Accepted" in result["context_preview"]
+    assert "运行用时：" in result["context_preview"]
+
+
+def test_accepted_context_uses_refactor_hint(coach_db: Path) -> None:
+    from leetcode_tracker.coach.context import build_coach_context
+
+    conn = connect(coach_db)
+    try:
+        ctx = build_coach_context(conn, "sub-53-new")
+    finally:
+        conn.close()
+
+    assert "**Accepted**" in ctx["markdown"]
+    assert "重构顾问" in ctx["markdown"]
+    assert "⚠️ 逻辑错误" not in ctx["markdown"]
+    assert "运行用时：" in ctx["markdown"]
+    assert "内存消耗：" in ctx["markdown"]
+
+
+def test_prepare_stores_submission_status_and_ac_opening(coach_db: Path) -> None:
+    from leetcode_tracker.coach.sessions import get_session
+
+    conn = connect(coach_db)
+    try:
+        result = service.prepare(conn, "sub-53-new")
+        session = get_session(conn, result["session_id"])
+    finally:
+        conn.close()
+
+    assert result["submission_status"] == "Accepted"
+    assert session is not None
+    assert session["submission_status"] == "Accepted"
+    assert "已通过" in result["opening"]
+    assert "耗时、内存" in result["opening"]
+    assert "卡在哪" not in result["opening"]
+
+
+def test_prepare_debug_status_for_wrong_answer(coach_db: Path) -> None:
+    conn = connect(coach_db)
+    try:
+        result = service.prepare(conn, "sub-53")
+    finally:
+        conn.close()
+
+    assert result["submission_status"] == "Wrong Answer"
+    assert "Wrong Answer" in result["opening"]
+
+
+def test_system_prompt_routes_by_status() -> None:
+    from leetcode_tracker.coach.prompts import (
+        COACH_PROMPT_AC,
+        COACH_PROMPT_DEBUG,
+        system_prompt_for_status,
+    )
+
+    assert system_prompt_for_status("Accepted") is COACH_PROMPT_AC
+    assert system_prompt_for_status("Wrong Answer") is COACH_PROMPT_DEBUG
+    assert system_prompt_for_status("Compile Error") is COACH_PROMPT_DEBUG
+    assert "重构顾问" in COACH_PROMPT_AC
+    assert "Bug 排查" in COACH_PROMPT_DEBUG
+    assert "```" in COACH_PROMPT_AC  # 禁令里提到代码块语法
+
+
+def test_code_block_guardrail_strips_and_appends() -> None:
+    from leetcode_tracker.coach.guardrail import apply_code_block_guardrail
+
+    raw = (
+        "可以这样改：\n"
+        "```java\n"
+        "class Solution { public int[] rotate(int[] a){ return a; } }\n"
+        "```\n"
+        "你觉得呢？"
+    )
+    cleaned, stripped = apply_code_block_guardrail(raw)
+    assert stripped is True
+    assert "```" not in cleaned
+    assert "class Solution" not in cleaned
+    assert "不能直接贴" in cleaned
+
+
+def test_chat_uses_ac_prompt_and_strips_leaked_code(
+    coach_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class LeakyModel:
+        def stream(self, messages: list[object]):
+            system = str(getattr(messages[0], "content", ""))
+            assert "重构顾问" in system
+            assert "Bug 排查" not in system
+            yield SimpleNamespace(
+                content=(
+                    "三次反转即可。\n"
+                    "```java\n"
+                    "class Solution { void rotate(int[] nums, int k){} }\n"
+                    "```\n"
+                )
+            )
+
+    monkeypatch.setattr(service, "build_chat_model", lambda: LeakyModel())
+    conn = connect(coach_db)
+    try:
+        session = service.prepare(conn, "sub-53-new")
+        result = service.chat(conn, session["session_id"], "有没有更好的写法")
+    finally:
+        conn.close()
+
+    assert "```" not in result["reply"]
+    assert "class Solution" not in result["reply"]
+    assert "不能直接贴" in result["reply"]
+
+
+def test_chat_compile_error_uses_debug_prompt(
+    coach_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn = connect(coach_db)
+    try:
+        save_submission(
+            conn,
+            {
+                "submission_id": "sub-ce",
+                "problem_id": 1,
+                "title": "两数之和",
+                "slug": "two-sum",
+                "difficulty": "Easy",
+                "status": "Compile Error",
+                "language": "java",
+                "code": "class Solution { int add(int a) { return a }\n",
+            },
+        )
+    finally:
+        conn.close()
+
+    class CaptureModel:
+        def __init__(self) -> None:
+            self.system = ""
+
+        def stream(self, messages: list[object]):
+            self.system = str(getattr(messages[0], "content", ""))
+            yield SimpleNamespace(content="括号可能没配对。你会怎么补？")
+
+    model = CaptureModel()
+    monkeypatch.setattr(service, "build_chat_model", lambda: model)
+    conn = connect(coach_db)
+    try:
+        session = service.prepare(conn, "sub-ce")
+        assert session["submission_status"] == "Compile Error"
+        service.chat(conn, session["session_id"], "编译不过")
+    finally:
+        conn.close()
+
+    assert "Bug 排查" in model.system
+    assert "重构顾问" not in model.system
+
+
+def test_prepare_refresh_context_on_reuse(coach_db: Path) -> None:
+    from leetcode_tracker.coach.sessions import get_session
+
+    conn = connect(coach_db)
+    try:
+        first = service.prepare(conn, "sub-53")
+        session_id = first["session_id"]
+        conn.execute(
+            "UPDATE coach_sessions SET context_markdown = ? WHERE session_id = ?",
+            ("## stale context", session_id),
+        )
+        conn.commit()
+        second = service.prepare(conn, "sub-53")
+        session = get_session(conn, session_id)
+    finally:
+        conn.close()
+
+    assert second["reused"] is True
+    assert second["session_id"] == session_id
+    assert session is not None
+    assert "stale context" not in str(session["context_markdown"])
+    assert "nums[0]" in str(session["context_markdown"])
+    assert "逻辑错误" in str(session["context_markdown"])
 
 
 def test_ollama_client_is_loopback_bounded_and_ignores_proxy() -> None:

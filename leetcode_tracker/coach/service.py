@@ -6,15 +6,15 @@ import sqlite3
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Annotated, Any, Optional
+from typing import Any, Optional
 
-from langchain_core.messages import AnyMessage
 from langgraph.graph import MessagesState
-from langgraph.graph.message import add_messages
 
 from leetcode_tracker.coach.context import build_coach_context
+from leetcode_tracker.coach.debug_log import log_llm_turn
+from leetcode_tracker.coach.guardrail import apply_code_block_guardrail
 from leetcode_tracker.coach.opening import template_opening
-from leetcode_tracker.coach.prompts import COACH_SYSTEM_PROMPT
+from leetcode_tracker.coach.prompts import system_prompt_for_status
 from leetcode_tracker.coach.sessions import get_or_create_session, get_session, touch_session
 from leetcode_tracker.llm.provider import build_chat_model
 from leetcode_tracker.paths import db_path
@@ -26,6 +26,7 @@ _SESSION_LOCKS_GUARD = threading.Lock()
 
 class CoachState(MessagesState):
     context_markdown: str
+    submission_status: str
     done: bool
     fallback_turn_count: int
     generation_error: str
@@ -66,7 +67,12 @@ def release_session(session_id: str) -> None:
 
 
 @contextmanager
-def _graph_for_turn(cancel_event: threading.Event):
+def _graph_for_turn(
+    cancel_event: threading.Event,
+    *,
+    session_id: str,
+    thread_id: str,
+):
     from langchain_core.messages import AIMessage, SystemMessage
     from langgraph.checkpoint.sqlite import SqliteSaver
     from langgraph.config import get_stream_writer
@@ -90,15 +96,18 @@ def _graph_for_turn(cancel_event: threading.Event):
 
     def coach_reply(state: CoachState) -> dict[str, Any]:
         writer = get_stream_writer()
+        status = str(state.get("submission_status") or "")
+        prompt = system_prompt_for_status(status)
         context_markdown = str(state.get("context_markdown") or "")
         system = SystemMessage(
-            content=f"{COACH_SYSTEM_PROMPT}\n\n## 陪练上下文\n{context_markdown}"
+            content=f"{prompt}\n\n## 陪练上下文\n{context_markdown}"
         )
+        outbound = [system, *list(state.get("messages") or [])]
         accumulated = ""
         fallback_turn = int(state.get("fallback_turn_count") or 0)
         try:
             model = build_chat_model()
-            for chunk in model.stream([system, *list(state.get("messages") or [])]):
+            for chunk in model.stream(outbound):
                 if cancel_event.is_set():
                     raise GenerationCancelled()
                 piece = getattr(chunk, "content", None)
@@ -108,11 +117,26 @@ def _graph_for_turn(cancel_event: threading.Event):
                 if not text:
                     continue
                 accumulated += text
-                writer({"type": "token", "text": text})
             if not accumulated:
                 raise RuntimeError("模型未返回内容")
+            # 先攒齐再过软护栏，再推 SSE，避免代码块先流到用户
+            reply, stripped = apply_code_block_guardrail(accumulated)
+            writer({"type": "token", "text": reply})
+            log_llm_turn(
+                session_id=session_id,
+                thread_id=thread_id,
+                messages=outbound,
+                reply=reply,
+                meta={
+                    "node": "coach_reply",
+                    "fallback_turn": fallback_turn,
+                    "submission_status": status,
+                    "prompt_mode": "ac" if status == "Accepted" else "debug",
+                    "stripped": stripped,
+                },
+            )
             return {
-                "messages": [AIMessage(content=accumulated)],
+                "messages": [AIMessage(content=reply)],
                 "done": False,
                 "fallback_turn_count": fallback_turn,
                 "generation_error": "",
@@ -120,6 +144,18 @@ def _graph_for_turn(cancel_event: threading.Event):
         except GenerationCancelled:
             raise
         except Exception as exc:  # noqa: BLE001
+            log_llm_turn(
+                session_id=session_id,
+                thread_id=thread_id,
+                messages=outbound,
+                error=str(exc),
+                meta={
+                    "node": "coach_reply",
+                    "fallback_turn": fallback_turn,
+                    "submission_status": status,
+                    "prompt_mode": "ac" if status == "Accepted" else "debug",
+                },
+            )
             return {
                 "done": False,
                 "fallback_turn_count": fallback_turn,
@@ -132,14 +168,20 @@ def _graph_for_turn(cancel_event: threading.Event):
     def fallback_reply(state: CoachState) -> dict[str, Any]:
         fallback_turn = int(state.get("fallback_turn_count") or 0)
         reply = _fallback_reply(fallback_turn)
+        err = str(state.get("generation_error") or "unknown error")
+        log_llm_turn(
+            session_id=session_id,
+            thread_id=thread_id,
+            messages=list(state.get("messages") or []),
+            reply=reply,
+            error=err,
+            meta={"node": "fallback_reply", "fallback_turn": fallback_turn},
+        )
         get_stream_writer()(
             {
                 "type": "fallback",
                 "text": reply,
-                "message": (
-                    "模型不可用，已切换本地降级陪练："
-                    f"{state.get('generation_error') or 'unknown error'}"
-                ),
+                "message": f"模型不可用，已切换本地降级陪练：{err}",
             }
         )
         return {
@@ -198,6 +240,7 @@ def _session_payload(
         "opening": session["opening"],
         "problem_id": session["problem_id"],
         "submission_id": session["submission_id"],
+        "submission_status": session.get("submission_status") or "",
         "requested_submission_id": requested_submission_id,
         "resolved_submission_id": resolved_submission_id,
         "fallback_used": fallback_used,
@@ -217,10 +260,11 @@ def prepare(
 ) -> dict[str, Any]:
     """只读提交事实并原子创建模板会话；绝不调用 LLM。"""
     ctx = build_coach_context(conn, submission_id, problem_id=problem_id)
+    status = str(ctx["status"])
     opening = template_opening(
         problem_id=int(ctx["problem_id"]),
         title=str(ctx["title"]),
-        status=str(ctx["status"]),
+        status=status,
         placement=ctx.get("placement"),
         today_count=int(ctx["today_count"]),
     )
@@ -230,6 +274,7 @@ def prepare(
         problem_id=int(ctx["problem_id"]),
         opening=opening,
         context_markdown=str(ctx["markdown"]),
+        submission_status=status,
     )
     return _session_payload(
         session,
@@ -290,8 +335,11 @@ def chat_stream(
     done = False
     try:
         yield {"type": "ready", "session_id": session_id}
-        with _graph_for_turn(stop) as graph:
-            config = {"configurable": {"thread_id": session["thread_id"]}}
+        thread_id = str(session["thread_id"])
+        with _graph_for_turn(
+            stop, session_id=session_id, thread_id=thread_id
+        ) as graph:
+            config = {"configurable": {"thread_id": thread_id}}
             snapshot = graph.get_state(config)
             has_messages = bool(
                 snapshot and snapshot.values and snapshot.values.get("messages")
@@ -302,6 +350,7 @@ def chat_stream(
             graph_input = {
                 "messages": messages,
                 "context_markdown": str(session.get("context_markdown") or ""),
+                "submission_status": str(session.get("submission_status") or ""),
                 "done": bool(
                     snapshot.values.get("done")
                     if snapshot and snapshot.values

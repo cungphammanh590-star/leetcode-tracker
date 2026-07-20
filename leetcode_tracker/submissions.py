@@ -29,7 +29,7 @@ def get_latest_submission_for_problem(
 ) -> Optional[dict[str, Any]]:
     row = conn.execute(
         """
-        SELECT s.submission_id, s.problem_id, s.status, s.runtime_ms,
+        SELECT s.submission_id, s.problem_id, s.status, s.code, s.runtime_ms,
                s.memory_mb, s.language, s.submitted_at,
                p.title, p.slug, p.difficulty
         FROM submissions s

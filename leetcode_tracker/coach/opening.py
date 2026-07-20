@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from leetcode_tracker.kg.queries import NodePlacement
 
 
 def _status_hint(status: str) -> str:
-    if status == "Accepted":
-        return "通过了，不错"
     if status == "Wrong Answer":
         return "这次 Wrong Answer"
     if status == "Time Limit Exceeded":
@@ -29,10 +27,19 @@ def template_opening(
     placement: Optional[NodePlacement],
     today_count: int,
 ) -> str:
-    hint = _status_hint(status)
-    head = f"{hint}：{problem_id}. {title}"
+    label = f"{problem_id}. {title}"
     if today_count > 1:
-        head += f"（今天第 {today_count} 次提交）"
+        label += f"（今天第 {today_count} 次提交）"
+
+    # AC：极简方向锁定，不给模型「卡点」语感
+    if status == "Accepted":
+        return (
+            f"✅ {label} 已通过。"
+            "接下来想聊优化方向——你更关注耗时、内存，还是代码可读性？"
+        )
+
+    hint = _status_hint(status)
+    head = f"{hint}：{label}"
 
     if placement is None:
         return (
@@ -43,17 +50,8 @@ def template_opening(
     module = f"{placement.track_name} / {placement.submodule_name}"
     progress = f"{placement.accepted_in_node}/{placement.total_in_node}"
     ann = f"，考点标注：{placement.annotation}" if placement.annotation else ""
-
-    if status == "Accepted":
-        tail = (
-            f"在路线 {module} 中排第 {placement.sort_order} 题{ann}，"
-            f"子模块进度 {progress}。"
-            "想聊聊思路有没有更稳的写法，还是先到这？"
-        )
-    else:
-        tail = (
-            f"属于路线 {module} 第 {placement.sort_order} 题{ann}，"
-            f"子模块进度 {progress}。"
-            "你最先怀疑的是边界、复杂度，还是实现细节？"
-        )
-    return f"{head}。{tail}"
+    return (
+        f"{head}。属于路线 {module} 第 {placement.sort_order} 题{ann}，"
+        f"子模块进度 {progress}。"
+        "你最先怀疑的是边界、复杂度，还是实现细节？"
+    )

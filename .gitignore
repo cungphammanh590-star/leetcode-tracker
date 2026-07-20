@@ -30,3 +30,4 @@ openspec/
 package.json
 scripts/
 .build-venv/
+log/
