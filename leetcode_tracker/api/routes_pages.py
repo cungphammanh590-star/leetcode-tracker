@@ -55,6 +55,12 @@ def coach_page() -> Response:
     return _html("coach.html")
 
 
+@router.get("/ops")
+@router.get("/ops.html")
+def ops_page() -> Response:
+    return _html("ops.html")
+
+
 @router.get("/problems/{problem_id}")
 def problem_page(problem_id: int) -> Response:  # noqa: ARG001
     return _html("problem.html")

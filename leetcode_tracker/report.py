@@ -85,7 +85,7 @@ def render_daily_markdown(stats: OverviewStats, day: str) -> str:
             "",
             "## 继续保持",
             "",
-            f"连续打卡 {stats.streak_days} 天。可用 `leetcode-tracker stats` 或桌面仪表盘查看进度。",
+            f"连续打卡 {stats.streak_days} 天。可用 `leetcode-tracker stats` 或网页仪表盘查看进度。",
             "",
         ]
     )

@@ -92,3 +92,16 @@ def log_llm_turn(
         return path
     except Exception:  # noqa: BLE001 - 调试日志绝不可拖垮主流程
         return None
+
+
+def clean_coach_debug_logs() -> list[Path]:
+    """删除陪练调试日志（仓库 log/coach 或 data_dir/log/coach）。"""
+    root = coach_log_dir() / "coach"
+    if not root.is_dir():
+        return []
+    removed: list[Path] = []
+    for path in sorted(root.glob("*.md")):
+        if path.is_file():
+            path.unlink()
+            removed.append(path)
+    return removed

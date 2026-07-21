@@ -1,6 +1,6 @@
 # LeetCode Tracker
 
-完全本地的 **leetcode.cn** 刷题追踪助手（v0.3.1）。  
+完全本地的 **leetcode.cn** 刷题追踪助手（v0.3.2）。  
 在浏览器正常提交后，扩展会把记录写到你的 Mac 上；可选 **知识图谱 + 本地陪练** 在每次提交后陪你复盘。**刷题数据不出本机**；陪练默认使用本机 Ollama（可选配置云端 API 占位，MVP 未启用）。
 
 ## 你需要准备什么
@@ -19,14 +19,17 @@ pip install git+https://github.com/cungphammanh590-star/leetcode-tracker.git
 # 陪练 + 知识图谱（可选 extra）
 pip install 'leetcode-tracker[coach]'
 
-# 启动本机服务
+# 启动本机服务（唯一 UI 入口：浏览器）
 leetcode-tracker serve
 
 # 一次性导入学习路线图（algorithm-stone，随包附带）
 leetcode-tracker kg import
 ```
 
-浏览器打开：**http://127.0.0.1:8763/**
+浏览器打开：
+
+- 仪表盘：**http://127.0.0.1:8763/**
+- 维护台：**http://127.0.0.1:8763/ops**（日报、清日志、重建 stats、图谱导入等）
 
 ### 浏览器扩展
 
@@ -36,32 +39,32 @@ leetcode-tracker kg import
 4. 通知点击或弹窗「打开陪练」→ 深链同时携带 `submission` 与 `problem_id`；页面先展示模板首句，用户发送消息时才首次调用模型，续聊走 **SSE**
 5. **三接口解耦**：`/submit` → `prepare` → `stream`，禁止合并进同一请求
 
-本机桥接为 **FastAPI + uvicorn**（`GET /health` 含 `"server":"fastapi"`）。若仪表盘无新提交，先确认旧的标准库进程已退出并重启 `serve`，再**重载扩展**。
+本机桥接为 **FastAPI + uvicorn**（`GET /health` 含 `"server":"fastapi"`）。若仪表盘无新提交，先确认旧进程已退出并重启 `serve`，再**重载扩展**。
 
 若修改了桥接端口（`leetcode-tracker config set port 9000`），扩展会通过 `GET /health` 自动读取 `port` 字段；请重新加载扩展并重启 `serve`。
 
-## v0.3.0 新能力
+## 网页能力
 
-| 能力 | 说明 |
+| 页面 | 说明 |
 |------|------|
-| **知识图谱** | 自 [algorithm-stone](https://github.com/acm-clan/algorithm-stone)（MIT）导入 14 条路线、子模块与学习顺序 |
-| **陪练 Coach** | 入库后 `prepare` 原子复用模板会话；首条用户消息才调用模型；LangGraph 负责路由、token 流、checkpoint、结束与 fallback |
-| **陪练页** | `http://127.0.0.1:8763/coach?submission=<id>&problem_id=<id>`；缺 submission 时可按 problem_id 取该题最新提交 |
-| **扩展弹窗** | 题目页打开扩展 → 本题建议 +「打开陪练」 |
-| **CLI** | `kg import/status/progress/context`、`coach follow/debrief/chat`（CLI 同步；浏览器 SSE） |
+| `/` | 今日概览、题目画像、错题与最近提交 |
+| `/ops` | 维护台：日报生成/清理、清日志、重建 stats、KG 状态与导入、只读配置 |
+| `/coach` | 陪练页（SSE） |
+| `/problems/{id}` | 单题详情 |
 
-讲题系统（Tutor）**不在本版本**。
+讲题系统（Tutor）**不在本版本**。本版本**不再提供** pywebview 桌面壳（`leetcode-tracker app` 已移除）。
 
 ## 常用命令
 
 | 命令 | 用途 |
 |------|------|
-| `leetcode-tracker serve` | 启动本机服务 |
+| `leetcode-tracker serve` | 启动本机服务（浏览器打开仪表盘 / 维护台） |
 | `leetcode-tracker kg import` | 导入 bundled 知识图谱 |
 | `leetcode-tracker kg progress --track dp` | 查看 DP 路线子模块进度 |
 | `leetcode-tracker coach follow <submission_id>` | prepare：模板首句 + session_id（不调用 LLM） |
 | `leetcode-tracker coach chat <submission_id>` | 终端同步续聊（浏览器走 SSE `/api/coach/stream`） |
 | `leetcode-tracker config set llm.coach_model <name>` | 更换本地模型 |
+| `leetcode-tracker autostart install` | macOS 开机自启 `serve` |
 
 ## 数据存在哪里
 
@@ -69,6 +72,7 @@ leetcode-tracker kg import
 |------|------|
 | **刷题记录 + 图谱 + 陪练会话** | `~/.local/share/leetcode-tracker/leetcode.db` |
 | **配置** | `~/.config/leetcode-tracker/config.json`（含嵌套 `llm` 对象） |
+| **日报** | 配置项 `report_dir`（默认 `~/leetcode-reports`） |
 
 ## Neo 8GB 建议
 
@@ -83,6 +87,7 @@ leetcode-tracker kg import
 - **采集与陪练解耦**：`/submit` 只写库；成功后再独立 `prepare`；续聊走 SSE
 - **本机模型边界**：Ollama 仅允许 loopback、显式不走代理并设置 timeout；同 thread 并发 stream 被拒绝，SSE 断连会取消生成
 - 图谱覆盖约 890+ 题；图谱外题目陪练降级为 `problem_stats` 画像
+- 维护台破坏性操作需 `confirm=true`；本轮不提供网页清空 submissions / 改端口
 
 ## 图谱数据来源
 

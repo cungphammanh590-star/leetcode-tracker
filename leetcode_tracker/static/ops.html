@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>维护台 · LeetCode Tracker</title>
+  <style>
+    :root {
+      --bg: #f4f1eb;
+      --ink: #1c1917;
+      --muted: #78716c;
+      --card: #fffcf7;
+      --line: #e7e5e4;
+      --accent: #0f766e;
+      --warn: #b45309;
+      --danger: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Noto Sans SC", system-ui, sans-serif;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #d9f3ef 0%, transparent 55%),
+        radial-gradient(900px 400px at 100% 0%, #fde68a55 0%, transparent 50%),
+        var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    header, main { max-width: 880px; margin: 0 auto; padding: 24px 24px 8px; }
+    main { padding-bottom: 48px; }
+    h1 { margin: 0; font-size: 26px; letter-spacing: -0.03em; }
+    .sub { color: var(--muted); margin-top: 6px; font-size: 14px; }
+    .nav { margin-top: 10px; font-size: 13px; }
+    .nav a { color: var(--accent); text-decoration: none; margin-right: 14px; }
+    .nav a:hover { text-decoration: underline; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px 18px;
+      margin-bottom: 14px;
+    }
+    h2 { margin: 0 0 8px; font-size: 16px; }
+    p.hint { margin: 0 0 12px; font-size: 13px; color: var(--muted); line-height: 1.45; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.primary:hover { filter: brightness(1.05); color: #fff; }
+    button.warn { border-color: #fbbf24; color: var(--warn); }
+    button.danger { border-color: #fca5a5; color: var(--danger); }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    pre.out {
+      margin: 12px 0 0;
+      padding: 12px;
+      background: #f5f5f4;
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.45;
+      max-height: 320px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg { font-size: 13px; margin-top: 10px; color: var(--muted); }
+    .msg.ok { color: var(--accent); }
+    .msg.err { color: var(--danger); }
+    dl {
+      margin: 0;
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 6px 12px;
+      font-size: 13px;
+    }
+    dt { color: var(--muted); }
+    dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>维护台</h1>
+    <div class="sub">本机运维 · 破坏性操作需确认 · 不改动提交事实表</div>
+    <div class="nav">
+      <a href="/">仪表盘</a>
+      <a href="/ops">维护台</a>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>本机配置（只读）</h2>
+      <p class="hint">改端口请用 CLI：<code>leetcode-tracker config set port …</code></p>
+      <div class="row">
+        <button type="button" id="btn-config">刷新配置</button>
+      </div>
+      <dl id="config-dl"></dl>
+      <div class="msg" id="config-msg"></div>
+    </section>
+
+    <section>
+      <h2>今日日报</h2>
+      <p class="hint">生成 Markdown 快照并在此预览（写入配置中的 report_dir）。</p>
+      <div class="row">
+        <button type="button" class="primary" id="btn-report">生成今日日报</button>
+        <button type="button" class="warn" id="btn-report-clean-today">清理今日日报</button>
+        <button type="button" class="danger" id="btn-report-clean-all">清理全部日报</button>
+      </div>
+      <div class="msg" id="report-msg"></div>
+      <pre class="out" id="report-out" hidden></pre>
+    </section>
+
+    <section>
+      <h2>清理日志</h2>
+      <p class="hint">清空 LaunchAgent 服务日志，并默认清理陪练调试日志（log/coach）。</p>
+      <div class="row">
+        <button type="button" class="warn" id="btn-logs">清理服务 + 陪练调试日志</button>
+      </div>
+      <div class="msg" id="logs-msg"></div>
+    </section>
+
+    <section>
+      <h2>重建题目汇总</h2>
+      <p class="hint">从 submissions 全量重建 problem_stats（不删提交记录）。</p>
+      <div class="row">
+        <button type="button" class="warn" id="btn-rebuild">全量重建 stats</button>
+      </div>
+      <div class="msg" id="rebuild-msg"></div>
+    </section>
+
+    <section>
+      <h2>知识图谱</h2>
+      <p class="hint">导入会重建 kg_* 表；用户提交数据不受影响。</p>
+      <div class="row">
+        <button type="button" id="btn-kg-status">查看状态</button>
+        <button type="button" class="warn" id="btn-kg-import">重新导入图谱</button>
+      </div>
+      <div class="msg" id="kg-msg"></div>
+      <pre class="out" id="kg-out" hidden></pre>
+    </section>
+  </main>
+  <script>
+    function setMsg(id, text, kind) {
+      const el = document.getElementById(id);
+      el.textContent = text || "";
+      el.className = "msg" + (kind ? " " + kind : "");
+    }
+
+    async function postJson(url, body) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      return { res, data };
+    }
+
+    async function withBusy(btn, fn) {
+      btn.disabled = true;
+      try {
+        await fn();
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function loadConfig() {
+      setMsg("config-msg", "加载中…");
+      try {
+        const res = await fetch("/api/ops/config");
+        const data = await res.json();
+        if (data.status !== "ok") throw new Error(data.message || "failed");
+        const cfg = data.config || {};
+        const rows = [
+          ["host", cfg.host],
+          ["port", cfg.port],
+          ["report_dir", cfg.report_dir],
+          ["report_time", cfg.report_time],
+          ["autostart", String(cfg.autostart)],
+          ["llm.provider", (cfg.llm || {}).provider],
+          ["llm.coach_model", (cfg.llm || {}).coach_model],
+          ["db_path", cfg.db_path_readonly],
+        ];
+        document.getElementById("config-dl").innerHTML = rows
+          .map(([k, v]) => "<dt>" + k + "</dt><dd>" + (v == null ? "—" : v) + "</dd>")
+          .join("");
+        setMsg("config-msg", "已更新", "ok");
+      } catch (err) {
+        setMsg("config-msg", String(err), "err");
+      }
+    }
+
+    document.getElementById("btn-config").onclick = () => loadConfig();
+
+    document.getElementById("btn-report").onclick = function () {
+      const btn = this;
+      withBusy(btn, async () => {
+        setMsg("report-msg", "生成中…");
+        try {
+          const { data } = await postJson("/api/ops/report/today", {});
+          if (data.status !== "ok") throw new Error(data.message || "failed");
+          const out = document.getElementById("report-out");
+          out.hidden = false;
+          out.textContent = data.markdown || "";
+          setMsg("report-msg", "已写入 " + data.path, "ok");
+        } catch (err) {
+          setMsg("report-msg", String(err), "err");
+        }
+      });
+    };
+
+    async function cleanReports(todayOnly) {
+      const label = todayOnly ? "今日日报" : "全部日报";
+      if (!confirm("确认删除" + label + "？此操作不可恢复。")) return;
+      setMsg("report-msg", "清理中…");
+      try {
+        const { data } = await postJson("/api/ops/report/clean", {
+          confirm: true,
+          today_only: todayOnly,
+        });
+        if (data.status !== "ok") throw new Error(data.message || "failed");
+        setMsg("report-msg", "已删除 " + data.count + " 个文件", "ok");
+      } catch (err) {
+        setMsg("report-msg", String(err), "err");
+      }
+    }
+
+    document.getElementById("btn-report-clean-today").onclick = () => cleanReports(true);
+    document.getElementById("btn-report-clean-all").onclick = () => cleanReports(false);
+
+    document.getElementById("btn-logs").onclick = function () {
+      const btn = this;
+      if (!confirm("确认清理服务日志与陪练调试日志？")) return;
+      withBusy(btn, async () => {
+        setMsg("logs-msg", "清理中…");
+        try {
+          const { data } = await postJson("/api/ops/logs/clean", {
+            confirm: true,
+            include_coach_debug: true,
+          });
+          if (data.status !== "ok") throw new Error(data.message || "failed");
+          setMsg(
+            "logs-msg",
+            "已删除 " +
+              data.count +
+              " 个文件（服务 " +
+              (data.service_logs || []).length +
+              " · 陪练调试 " +
+              (data.coach_debug_logs || []).length +
+              "）",
+            "ok"
+          );
+        } catch (err) {
+          setMsg("logs-msg", String(err), "err");
+        }
+      });
+    };
+
+    document.getElementById("btn-rebuild").onclick = function () {
+      const btn = this;
+      if (!confirm("确认从 submissions 全量重建题目汇总？提交记录不会删除。")) return;
+      withBusy(btn, async () => {
+        setMsg("rebuild-msg", "重建中…");
+        try {
+          const { data } = await postJson("/api/ops/stats/rebuild", {
+            confirm: true,
+            from_scratch: true,
+          });
+          if (data.status !== "ok") throw new Error(data.message || "failed");
+          setMsg("rebuild-msg", "已重建 " + data.problems + " 题汇总", "ok");
+        } catch (err) {
+          setMsg("rebuild-msg", String(err), "err");
+        }
+      });
+    };
+
+    document.getElementById("btn-kg-status").onclick = async function () {
+      setMsg("kg-msg", "加载中…");
+      try {
+        const res = await fetch("/api/ops/kg");
+        const data = await res.json();
+        if (data.status !== "ok") throw new Error(data.message || "failed");
+        const out = document.getElementById("kg-out");
+        out.hidden = false;
+        out.textContent = JSON.stringify(data, null, 2);
+        setMsg(
+          "kg-msg",
+          data.imported
+            ? "已导入 · " + data.tracks + " 路线 / " + data.problems + " 题"
+            : "尚未导入图谱",
+          "ok"
+        );
+      } catch (err) {
+        setMsg("kg-msg", String(err), "err");
+      }
+    };
+
+    document.getElementById("btn-kg-import").onclick = function () {
+      const btn = this;
+      if (!confirm("确认重新导入知识图谱？将重建 kg_* 表。")) return;
+      withBusy(btn, async () => {
+        setMsg("kg-msg", "导入中…");
+        try {
+          const { data } = await postJson("/api/ops/kg/import", { confirm: true });
+          if (data.status !== "ok") throw new Error(data.message || "failed");
+          const out = document.getElementById("kg-out");
+          out.hidden = false;
+          out.textContent = JSON.stringify(data, null, 2);
+          setMsg(
+            "kg-msg",
+            "导入完成 · " + data.tracks + " tracks / " + data.problems + " problems",
+            "ok"
+          );
+        } catch (err) {
+          setMsg("kg-msg", String(err), "err");
+        }
+      });
+    };
+
+    loadConfig();
+  </script>
+</body>
+</html>

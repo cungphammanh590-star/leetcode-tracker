@@ -7,7 +7,6 @@ import json
 import sys
 
 from leetcode_tracker import __version__
-from leetcode_tracker.app import run_app
 from leetcode_tracker.autostart import clean_logs, install_autostart, uninstall_autostart
 from leetcode_tracker.config import CONFIG_KEYS, load_config, mask_config_for_display, set_config_value
 from leetcode_tracker.db import init_db
@@ -29,12 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    serve = sub.add_parser("serve", help="启动本机桥接服务与仪表盘")
+    serve = sub.add_parser("serve", help="启动本机桥接服务与网页仪表盘")
     serve.add_argument("--host", default=None, help="默认读配置")
     serve.add_argument("--port", type=int, default=None, help="默认读配置")
 
     sub.add_parser("stats", help="打印刷题统计概览")
-    sub.add_parser("app", help="用 pywebview 打开桌面仪表盘")
 
     rebuild = sub.add_parser("rebuild-stats", help="从 submissions 重建题目汇总表")
     rebuild.add_argument(
@@ -157,10 +155,6 @@ def cmd_autostart(args: argparse.Namespace) -> int:
     return 2
 
 
-def cmd_app(_: argparse.Namespace) -> int:
-    return run_app()
-
-
 def cmd_rebuild_stats(args: argparse.Namespace) -> int:
     conn = init_db()
     try:
@@ -194,7 +188,6 @@ def main(argv: list[str] | None = None) -> int:
         "logs": cmd_logs,
         "config": cmd_config,
         "autostart": cmd_autostart,
-        "app": cmd_app,
         "rebuild-stats": cmd_rebuild_stats,
         "llm-context": cmd_llm_context,
         "kg": cmd_kg,

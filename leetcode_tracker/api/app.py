@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from leetcode_tracker.api.routes_coach import router as coach_router
 from leetcode_tracker.api.routes_core import router as core_router
+from leetcode_tracker.api.routes_ops import router as ops_router
 from leetcode_tracker.api.routes_pages import router as pages_router
 from leetcode_tracker.api.routes_stats import router as stats_router
 from leetcode_tracker.db import init_db
@@ -43,7 +44,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="LeetCode Tracker Bridge",
-        version="0.3.1",
+        version="0.3.2",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -54,4 +55,5 @@ def create_app() -> FastAPI:
     app.include_router(pages_router)
     app.include_router(stats_router)
     app.include_router(coach_router)
+    app.include_router(ops_router)
     return app
