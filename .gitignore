@@ -36,3 +36,5 @@ log/
 .ignore/
 
 .ruff_cache/
+
+tests/
