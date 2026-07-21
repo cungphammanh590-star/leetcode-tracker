@@ -31,3 +31,8 @@ package.json
 scripts/
 .build-venv/
 log/
+
+# 本地调试临时目录
+.ignore/
+
+.ruff_cache/
