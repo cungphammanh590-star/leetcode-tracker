@@ -37,6 +37,8 @@ def health() -> Any:
             "host": host,
             "kg_imported": kg_imported,
             "coach_available": coach_dependencies_available(),
+            "llm_provider": str((cfg.get("llm") or {}).get("provider") or "ollama"),
+            "llm_api_provider": str((cfg.get("llm") or {}).get("api_provider") or ""),
         }
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(

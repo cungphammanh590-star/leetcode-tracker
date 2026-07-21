@@ -272,12 +272,23 @@ async def coach_stream(request: Request) -> Any:
 
     check_conn = init_db()
     try:
-        from leetcode_tracker.coach.sessions import get_session
+        from leetcode_tracker.coach.sessions import get_session, is_session_abandoned
 
-        if get_session(check_conn, session_id) is None:
+        session_row = get_session(check_conn, session_id)
+        if session_row is None:
             return JSONResponse(
                 status_code=404,
                 content={"status": "error", "message": "session not found"},
+            )
+        if is_session_abandoned(session_row):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "status": "error",
+                    "code": "session_abandoned",
+                    "message": "本对话已结束，请重新打开陪练再继续。",
+                    "reopen_required": True,
+                },
             )
     finally:
         check_conn.close()

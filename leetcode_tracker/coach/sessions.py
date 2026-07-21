@@ -21,7 +21,8 @@ def ensure_coach_session_schema(conn: sqlite3.Connection) -> None:
             submission_status TEXT,
             thread_id TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            abandoned_at TEXT
         )
         """
     )
@@ -32,6 +33,10 @@ def ensure_coach_session_schema(conn: sqlite3.Connection) -> None:
     if "submission_status" not in columns:
         conn.execute(
             "ALTER TABLE coach_sessions ADD COLUMN submission_status TEXT"
+        )
+    if "abandoned_at" not in columns:
+        conn.execute(
+            "ALTER TABLE coach_sessions ADD COLUMN abandoned_at TEXT"
         )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_coach_sessions_submission ON coach_sessions(submission_id)"
@@ -101,6 +106,7 @@ def get_or_create_session(
             """
             SELECT * FROM coach_sessions
             WHERE submission_id = ?
+              AND (abandoned_at IS NULL OR abandoned_at = '')
             ORDER BY created_at DESC
             LIMIT 1
             """,
@@ -178,6 +184,28 @@ def get_session(conn: sqlite3.Connection, session_id: str) -> Optional[dict[str,
         (session_id,),
     ).fetchone()
     return dict(row) if row else None
+
+
+def is_session_abandoned(session: dict[str, Any] | None) -> bool:
+    if not session:
+        return False
+    return bool(str(session.get("abandoned_at") or "").strip())
+
+
+def abandon_session(conn: sqlite3.Connection, session_id: str) -> None:
+    """标记会话作废：后续 stream 拒绝，prepare 将新建会话。"""
+    ensure_coach_session_schema(conn)
+    now = china_now_iso()
+    conn.execute(
+        """
+        UPDATE coach_sessions
+        SET abandoned_at = ?, updated_at = ?
+        WHERE session_id = ?
+          AND (abandoned_at IS NULL OR abandoned_at = '')
+        """,
+        (now, now, session_id),
+    )
+    conn.commit()
 
 
 def get_latest_session_for_submission(

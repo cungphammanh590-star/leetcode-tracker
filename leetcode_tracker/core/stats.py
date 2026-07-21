@@ -1,4 +1,4 @@
-"""统计查询（供 stats、report、仪表盘复用）。"""
+"""统计查询（供 stats、仪表盘复用）。"""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from leetcode_tracker.infra.timeutil import china_today
 
 @dataclass
 class OverviewStats:
+    date: str
     total_submissions: int
     accepted_count: int
     acceptance_rate: float
@@ -160,10 +161,16 @@ def get_last7_days(conn: sqlite3.Connection, today: Optional[date] = None) -> li
     return result
 
 
-def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> OverviewStats:
+def get_overview(
+    conn: sqlite3.Connection,
+    *,
+    day: Optional[date] = None,
+    recent_limit: int = 20,
+) -> OverviewStats:
+    """概览。day 为中国时区日历日；缺省为今天。today_* 字段表示所选日切片。"""
     ensure_stats_materialized(conn)
-    today = china_today()
-    today_str = today.isoformat()
+    selected = day or china_today()
+    day_str = selected.isoformat()
 
     total = int(conn.execute("SELECT COUNT(*) AS c FROM submissions").fetchone()["c"])
     accepted = int(
@@ -185,22 +192,22 @@ def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> Overvie
             ).fetchone()["c"]
         )
 
-    today_total = int(
+    day_total = int(
         conn.execute(
             """
             SELECT COUNT(*) AS c FROM submissions
             WHERE date(submitted_at) = ?
             """,
-            (today_str,),
+            (day_str,),
         ).fetchone()["c"]
     )
-    today_accepted = int(
+    day_accepted = int(
         conn.execute(
             """
             SELECT COUNT(*) AS c FROM submissions
             WHERE date(submitted_at) = ? AND status = 'Accepted'
             """,
-            (today_str,),
+            (day_str,),
         ).fetchone()["c"]
     )
 
@@ -216,7 +223,7 @@ def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> Overvie
         (recent_limit,),
     ).fetchall()
 
-    today_rows = conn.execute(
+    day_rows = conn.execute(
         """
         SELECT s.submission_id, s.problem_id, p.title, p.slug, p.difficulty,
                s.status, s.runtime_ms, s.memory_mb, s.language, s.submitted_at
@@ -225,26 +232,27 @@ def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> Overvie
         WHERE date(s.submitted_at) = ?
         ORDER BY s.submitted_at DESC, s.id DESC
         """,
-        (today_str,),
+        (day_str,),
     ).fetchall()
 
-    today_wrong = get_today_wrong_summary(conn, today)
+    day_wrong = get_today_wrong_summary(conn, selected)
 
     return OverviewStats(
+        date=day_str,
         total_submissions=total,
         accepted_count=accepted,
         acceptance_rate=_rate(accepted, total),
         easy_solved=solved("Easy"),
         medium_solved=solved("Medium"),
         hard_solved=solved("Hard"),
-        today_submissions=today_total,
-        today_accepted=today_accepted,
-        today_acceptance_rate=_rate(today_accepted, today_total),
-        streak_days=compute_streak(conn, today),
+        today_submissions=day_total,
+        today_accepted=day_accepted,
+        today_acceptance_rate=_rate(day_accepted, day_total),
+        streak_days=compute_streak(conn, selected),
         recent=[_row_to_item(r) for r in recent_rows],
-        today_items=[_row_to_item(r) for r in today_rows],
-        today_wrong=today_wrong,
-        last7=get_last7_days(conn, today),
+        today_items=[_row_to_item(r) for r in day_rows],
+        today_wrong=day_wrong,
+        last7=get_last7_days(conn, selected),
     )
 
 

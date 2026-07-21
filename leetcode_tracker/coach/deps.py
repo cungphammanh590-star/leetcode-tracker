@@ -10,7 +10,6 @@ def coach_dependencies_available() -> bool:
     try:
         import langgraph  # noqa: F401
         import langchain_core  # noqa: F401
-        import langchain_ollama  # noqa: F401
         import langgraph.checkpoint.sqlite  # noqa: F401
     except ImportError:
         return False
@@ -20,5 +19,5 @@ def coach_dependencies_available() -> bool:
 def coach_import_error_message() -> str:
     return (
         "陪练功能需要安装可选依赖：pip install 'leetcode-tracker[coach]'"
-        "（另需本机 Ollama 与模型，见 README）"
+        "（本地 Ollama 或 DeepSeek API Key，见维护台 /ops）"
     )

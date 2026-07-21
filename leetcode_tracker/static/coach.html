@@ -265,6 +265,11 @@
           const data = await res.json().catch(() => ({}));
           showBanner(data.message || "发送失败");
           coachDiv.remove();
+          if (data.reopen_required || data.code === "session_abandoned") {
+            inputEl.disabled = true;
+            sendBtn.disabled = true;
+            sessionId = "";
+          }
           return;
         }
         let finished = false;
@@ -275,8 +280,18 @@
           } else if (event === "fallback" || data.type === "fallback") {
             coachDiv.textContent += data.text || "";
             showBanner(data.message || "模型不可用，已切换本地降级陪练。");
+            if (data.reopen_required || data.session_abandoned) {
+              inputEl.disabled = true;
+              sendBtn.disabled = true;
+              sessionId = "";
+            }
           } else if (event === "error" || data.type === "error") {
             showBanner(data.message || "对话出错");
+            if (data.reopen_required || data.code === "session_abandoned") {
+              inputEl.disabled = true;
+              sendBtn.disabled = true;
+              sessionId = "";
+            }
           } else if (event === "done" || data.type === "done") {
             finished = true;
             if (data.done) {

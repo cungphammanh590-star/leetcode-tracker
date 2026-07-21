@@ -8,17 +8,16 @@ from pathlib import Path
 from typing import Any
 
 LLM_DEFAULTS: dict[str, Any] = {
-    "provider": "ollama",
+    "provider": "ollama",  # ollama | api
     "coach_model": "qwen2.5:7b-instruct-q4_K_M",
-    "api_provider": "",
+    "api_provider": "",  # api 模式下：deepseek（当前仅此）
     "api_key": "",
+    "base_url": "",  # 可选；DeepSeek 默认 https://api.deepseek.com
 }
 
 DEFAULTS: dict[str, Any] = {
     "host": "127.0.0.1",
     "port": 8763,
-    "report_dir": str(Path.home() / "leetcode-reports"),
-    "report_time": "23:00",
     "autostart": False,
     "llm": deepcopy(LLM_DEFAULTS),
 }
@@ -27,13 +26,12 @@ CONFIG_KEYS = sorted(
     {
         "host",
         "port",
-        "report_dir",
-        "report_time",
         "autostart",
         "llm.provider",
         "llm.coach_model",
         "llm.api_provider",
         "llm.api_key",
+        "llm.base_url",
     }
 )
 
@@ -44,10 +42,6 @@ def config_dir() -> Path:
 
 def config_path() -> Path:
     return config_dir() / "config.json"
-
-
-def _expand_report_dir(value: str) -> str:
-    return str(Path(value).expanduser())
 
 
 def _merge_llm(target: dict[str, Any], raw: Any) -> None:
@@ -61,9 +55,10 @@ def _merge_llm(target: dict[str, Any], raw: Any) -> None:
 def _normalize_config(data: dict[str, Any]) -> dict[str, Any]:
     data["port"] = int(data["port"])
     data["autostart"] = bool(data["autostart"])
-    data["report_dir"] = _expand_report_dir(str(data["report_dir"]))
     data["host"] = str(data["host"])
-    data["report_time"] = str(data["report_time"])
+    # 忽略旧版 report_dir / report_time
+    data.pop("report_dir", None)
+    data.pop("report_time", None)
     llm = data.get("llm")
     if not isinstance(llm, dict):
         data["llm"] = deepcopy(LLM_DEFAULTS)
@@ -71,10 +66,15 @@ def _normalize_config(data: dict[str, Any]) -> dict[str, Any]:
         merged = deepcopy(LLM_DEFAULTS)
         _merge_llm(merged, llm)
         data["llm"] = merged
-    data["llm"]["provider"] = str(data["llm"]["provider"])
+    data["llm"]["provider"] = str(data["llm"]["provider"]).strip().lower() or "ollama"
+    if data["llm"]["provider"] not in {"ollama", "api"}:
+        data["llm"]["provider"] = "ollama"
     data["llm"]["coach_model"] = str(data["llm"]["coach_model"])
-    data["llm"]["api_provider"] = str(data["llm"]["api_provider"])
+    data["llm"]["api_provider"] = str(data["llm"]["api_provider"]).strip().lower()
     data["llm"]["api_key"] = str(data["llm"]["api_key"])
+    data["llm"]["base_url"] = str(data["llm"].get("base_url") or "")
+    if data["llm"]["provider"] == "api" and not data["llm"]["api_provider"]:
+        data["llm"]["api_provider"] = "deepseek"
     return data
 
 
@@ -85,7 +85,7 @@ def load_config() -> dict[str, Any]:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
-                for key in ("host", "port", "report_dir", "report_time", "autostart"):
+                for key in ("host", "port", "autostart"):
                     if key in raw:
                         data[key] = raw[key]
                 if "llm" in raw:
@@ -100,6 +100,10 @@ def save_config(data: dict[str, Any]) -> Path:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
     return path
 
 
@@ -130,9 +134,69 @@ def set_config_value(key: str, value: str) -> dict[str, Any]:
     return load_config()
 
 
+def update_llm_config(
+    *,
+    provider: str | None = None,
+    api_provider: str | None = None,
+    coach_model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    clear_api_key: bool = False,
+) -> dict[str, Any]:
+    """更新 llm 配置。api_key=None 表示不改动；clear_api_key 清空密钥。"""
+    cfg = load_config()
+    llm = cfg.setdefault("llm", deepcopy(LLM_DEFAULTS))
+    if provider is not None:
+        llm["provider"] = provider
+    if api_provider is not None:
+        llm["api_provider"] = api_provider
+    if coach_model is not None:
+        llm["coach_model"] = coach_model
+    if base_url is not None:
+        llm["base_url"] = base_url
+    if clear_api_key:
+        llm["api_key"] = ""
+    elif api_key is not None and str(api_key).strip():
+        # 空字符串表示「未填写」，保留原 key
+        llm["api_key"] = str(api_key).strip()
+    save_config(cfg)
+    return load_config()
+
+
+def clear_llm_api_key(*, switch_to_ollama: bool = True) -> dict[str, Any]:
+    cfg = load_config()
+    llm = cfg.setdefault("llm", deepcopy(LLM_DEFAULTS))
+    llm["api_key"] = ""
+    if switch_to_ollama:
+        llm["provider"] = "ollama"
+        llm["api_provider"] = ""
+        model = str(llm.get("coach_model") or "")
+        if model.startswith("deepseek") or not model:
+            llm["coach_model"] = LLM_DEFAULTS["coach_model"]
+    save_config(cfg)
+    return load_config()
+
+
+def switch_to_ollama_keep_key() -> dict[str, Any]:
+    """云端不可达时切回本地：保留 API Key，恢复默认本地模型名。"""
+    cfg = load_config()
+    llm = cfg.setdefault("llm", deepcopy(LLM_DEFAULTS))
+    llm["provider"] = "ollama"
+    llm["api_provider"] = ""
+    model = str(llm.get("coach_model") or "")
+    if model.startswith("deepseek") or not model:
+        llm["coach_model"] = LLM_DEFAULTS["coach_model"]
+    save_config(cfg)
+    return load_config()
+
+
 def mask_config_for_display(cfg: dict[str, Any]) -> dict[str, Any]:
     out = deepcopy(cfg)
-    api_key = out.get("llm", {}).get("api_key", "")
+    llm = out.setdefault("llm", {})
+    api_key = str(llm.get("api_key") or "")
+    llm["has_api_key"] = bool(api_key)
     if api_key:
-        out["llm"]["api_key"] = "***" + api_key[-4:] if len(api_key) > 4 else "***"
+        llm["api_key"] = "***" + api_key[-4:] if len(api_key) > 4 else "***"
+    else:
+        llm["api_key"] = ""
     return out

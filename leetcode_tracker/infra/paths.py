@@ -1,4 +1,4 @@
-"""路径常量（数据库路径固定，日报目录见 config）。"""
+"""路径常量（数据库路径固定）。"""
 
 from __future__ import annotations
 

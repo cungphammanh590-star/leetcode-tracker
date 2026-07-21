@@ -10,7 +10,6 @@ from leetcode_tracker import __version__
 from leetcode_tracker.infra.autostart import clean_logs, install_autostart, uninstall_autostart
 from leetcode_tracker.coach.deps import coach_dependencies_available, coach_import_error_message
 from leetcode_tracker.core.problem_stats import ensure_stats_materialized, get_llm_context, rebuild_stats
-from leetcode_tracker.core.report import clean_reports, write_today_report
 from leetcode_tracker.core.stats import format_stats_text, get_overview
 from leetcode_tracker.infra.config import CONFIG_KEYS, load_config, mask_config_for_display, set_config_value
 from leetcode_tracker.infra.db import init_db
@@ -150,13 +149,6 @@ def build_parser() -> argparse.ArgumentParser:
     llm = sub.add_parser("llm-context", help="输出单题 LLM 分析上下文（Markdown）")
     llm.add_argument("problem_id", type=int, help="题号，如 560")
 
-    report = sub.add_parser("report", help="生成或清理 Markdown 日报")
-    report.add_argument("--today", action="store_true", help="生成今日日报")
-    report_clean = report.add_subparsers(dest="report_command")
-    report_clean_p = report_clean.add_parser("clean", help="删除日报 Markdown 快照")
-    report_clean_p.add_argument("--today", action="store_true", help="仅删除今日日报")
-    report_clean_p.add_argument("--all", action="store_true", help="删除日报目录下全部 .md")
-
     logs = sub.add_parser("logs", help="管理自启服务日志")
     logs_sub = logs.add_subparsers(dest="logs_command", required=True)
     logs_sub.add_parser("clean", help="清空 leetcode-tracker 服务日志")
@@ -191,28 +183,6 @@ def cmd_stats(_: argparse.Namespace) -> int:
     finally:
         conn.close()
     return 0
-
-
-def cmd_report(args: argparse.Namespace) -> int:
-    if getattr(args, "report_command", None) == "clean":
-        if not args.today and not args.all:
-            print("请指定 --today 或 --all", file=sys.stderr)
-            print("示例: leetcode-tracker report clean --today", file=sys.stderr)
-            return 2
-        removed = clean_reports(today_only=args.today and not args.all)
-        if not removed:
-            print("没有可删除的日报文件")
-            return 0
-        for path in removed:
-            print(f"Removed {path}")
-        return 0
-    if args.today:
-        path = write_today_report()
-        print(f"Wrote {path}")
-        return 0
-    print("请使用: leetcode-tracker report --today", file=sys.stderr)
-    print("或: leetcode-tracker report clean --today|--all", file=sys.stderr)
-    return 2
 
 
 def cmd_logs(args: argparse.Namespace) -> int:
@@ -290,7 +260,6 @@ def main(argv: list[str] | None = None) -> int:
     dispatch = {
         "serve": cmd_serve,
         "stats": cmd_stats,
-        "report": cmd_report,
         "logs": cmd_logs,
         "config": cmd_config,
         "autostart": cmd_autostart,

@@ -8,7 +8,7 @@
 - macOS
 - Chrome 或 Edge
 - [leetcode.cn](https://leetcode.cn) 账号（照常刷题即可）
-- 可选陪练：[Ollama](https://ollama.com/) + 本机模型（8GB 内存建议 `qwen2.5:7b-instruct-q4_K_M`）
+- 可选陪练：[Ollama](https://ollama.com/) 本地模型，或在维护台填写 **DeepSeek API Key**（8GB 本机建议 `qwen2.5:7b-instruct-q4_K_M`）
 
 ## 安装
 
@@ -39,7 +39,7 @@ leetcode-tracker kg import
 3. 在 leetcode.cn 正常做题、提交；扩展角标显示 ok 即表示已记录
 4. 需要陪练时：点通知或扩展弹窗里的「打开陪练」，在页面里发消息即可（未装 `[coach]` / 未开 Ollama 也不影响采集）
 
-维护台（日报、清日志、重建统计、导入图谱）：**http://127.0.0.1:8763/ops**
+维护台（清日志、重建统计、导入图谱、陪练模型）：**http://127.0.0.1:8763/ops**
 
 若改过端口：`leetcode-tracker config set port 9000`，然后重启 `serve` 并重载扩展。
 
@@ -47,7 +47,7 @@ leetcode-tracker kg import
 
 | 地址 | 做什么 |
 |------|--------|
-| `/` | 今日概览、错题、最近提交 |
+| `/` | 按天概览（默认今天）、当日题目/错题、近 7 日、最近提交 |
 | `/ops` | 维护台 |
 | `/coach` | 陪练对话 |
 | `/problems/{题号}` | 单题详情 |
@@ -70,14 +70,15 @@ leetcode-tracker kg import
 |------|------|
 | 刷题记录 / 图谱 / 陪练会话 | `~/.local/share/leetcode-tracker/leetcode.db` |
 | 配置 | `~/.config/leetcode-tracker/config.json` |
-| 日报 | 默认 `~/leetcode-reports`（可用配置改） |
 
-时间与「今日」统计均按 **中国时区（北京时间）** 切日。
+时间与「今日」统计均按 **中国时区（北京时间）** 切日；仪表盘可切换日期回顾历史一天。若本机仍有旧版 `~/leetcode-reports` 目录，可自行删除，产品不再读写。
 
 ## 陪练小提示（可选）
 
-- 只追踪：不必装 Ollama
-- 陪练：打开 Ollama 并拉取模型后再在陪练页发消息；模型超时会有兜底回复，**不影响提交采集**
+- 只追踪：不必装 Ollama / 不必填 API Key
+- 本地：打开 Ollama 并拉取模型后再在陪练页发消息
+- 云端：打开 **http://127.0.0.1:8763/ops** →「陪练模型」选 DeepSeek，填写 Key 后保存；可「测试连接」或「一键清除 Key」
+- 模型超时/失败会有兜底回复，**不影响提交采集**
 - 8GB 机器避免同时跑多个大模型；陪练时少开无必要标签页
 
 ## 说明

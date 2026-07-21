@@ -37,6 +37,45 @@
     }
     .sub { color: var(--muted); margin-top: 6px; font-size: 14px; }
     main { max-width: 960px; margin: 0 auto; padding: 12px 24px 40px; }
+    .day-nav {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 12px 0 4px;
+    }
+    .day-nav button,
+    .pager button {
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .day-nav button:hover,
+    .pager button:hover { border-color: var(--accent); color: var(--accent); }
+    .day-nav button:disabled,
+    .pager button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .day-nav input[type="date"] {
+      border: 1px solid var(--line);
+      background: var(--card);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font: inherit;
+      font-size: 13px;
+      color: var(--ink);
+    }
+    .day-label {
+      font-size: 14px;
+      font-weight: 600;
+      margin-right: 4px;
+    }
     .grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -59,10 +98,39 @@
       margin-bottom: 14px;
     }
     h2 { margin: 0 0 10px; font-size: 16px; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 10px;
+    }
+    .toolbar input[type="search"] {
+      flex: 1;
+      min-width: 160px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 13px;
+      color: var(--ink);
+    }
+    .pager {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .pager .meta { margin-right: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
     th { color: var(--muted); font-weight: 500; }
     .ok { color: var(--ok); }
+    .fail { color: #b45309; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
     .link-title { font-weight: 500; }
@@ -73,7 +141,11 @@
       border-radius: 8px 8px 2px 2px;
       min-height: 4px;
       position: relative;
+      cursor: pointer;
     }
+    .bar:hover { background: #5eead4; }
+    .bar.active { background: #0f766e; }
+    .bar.active span { color: var(--ink); font-weight: 600; }
     .bar span {
       position: absolute;
       bottom: -18px;
@@ -97,9 +169,17 @@
     </div>
   </header>
   <main>
+    <div class="day-nav">
+      <span class="day-label" id="day_heading">今日</span>
+      <button type="button" id="btn-prev" title="上一天">←</button>
+      <input type="date" id="day_picker" />
+      <button type="button" id="btn-next" title="下一天">→</button>
+      <button type="button" id="btn-today">回到今天</button>
+    </div>
+
     <div class="grid">
-      <div class="metric"><div class="label">今日提交</div><div class="value" id="today_sub">—</div></div>
-      <div class="metric"><div class="label">今日通过</div><div class="value" id="today_ac">—</div></div>
+      <div class="metric"><div class="label" id="lbl_sub">今日提交</div><div class="value" id="today_sub">—</div></div>
+      <div class="metric"><div class="label" id="lbl_ac">今日通过</div><div class="value" id="today_ac">—</div></div>
       <div class="metric"><div class="label">连续打卡</div><div class="value" id="streak">—</div></div>
       <div class="metric"><div class="label">累计通过率</div><div class="value" id="rate">—</div></div>
     </div>
@@ -110,19 +190,32 @@
     </section>
 
     <section>
-      <h2>题目画像</h2>
+      <h2 id="h_items">今日题目</h2>
       <table>
-        <thead><tr><th>题目</th><th>难度</th><th>尝试</th><th>AC</th><th>挣扎指数</th><th>最近提交</th></tr></thead>
-        <tbody id="problems"></tbody>
+        <thead><tr><th>题目</th><th>难度</th><th>尝试</th><th>结果</th><th>用时</th></tr></thead>
+        <tbody id="day_items"></tbody>
       </table>
     </section>
 
     <section>
-      <h2>今日错题</h2>
+      <h2>题目画像</h2>
+      <div class="toolbar">
+        <input type="search" id="problems_q" placeholder="搜索题号或标题…" autocomplete="off" />
+      </div>
+      <table>
+        <thead><tr><th>题目</th><th>难度</th><th>尝试</th><th>AC</th><th>挣扎指数</th><th>最近提交</th></tr></thead>
+        <tbody id="problems"></tbody>
+      </table>
+      <div class="pager" id="problems_pager" hidden></div>
+    </section>
+
+    <section>
+      <h2 id="h_wrong">今日错题</h2>
       <table>
         <thead><tr><th>题目</th><th>难度</th><th>错误汇总</th></tr></thead>
         <tbody id="wrong"></tbody>
       </table>
+      <div class="pager" id="wrong_pager" hidden></div>
     </section>
 
     <section>
@@ -134,6 +227,101 @@
     </section>
   </main>
   <script>
+    const PAGE_SIZE = 8;
+
+    function chinaTodayStr() {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Shanghai",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+    }
+
+    function shiftDate(iso, delta) {
+      const [y, m, d] = iso.split("-").map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      dt.setUTCDate(dt.getUTCDate() + delta);
+      return dt.toISOString().slice(0, 10);
+    }
+
+    function paginate(list, page, pageSize) {
+      const total = list.length;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+      const safePage = Math.min(Math.max(1, page), totalPages);
+      const start = (safePage - 1) * pageSize;
+      return {
+        page: safePage,
+        totalPages,
+        total,
+        start: total ? start + 1 : 0,
+        end: Math.min(start + pageSize, total),
+        items: list.slice(start, start + pageSize),
+      };
+    }
+
+    function renderPager(el, state, onChange) {
+      if (!state.total) {
+        el.hidden = true;
+        el.innerHTML = "";
+        return;
+      }
+      el.hidden = false;
+      el.innerHTML =
+        '<span class="meta">' +
+        state.start +
+        "–" +
+        state.end +
+        " / " +
+        state.total +
+        "</span>" +
+        '<button type="button" data-act="prev"' +
+        (state.page <= 1 ? " disabled" : "") +
+        ">上一页</button>" +
+        "<span>" +
+        state.page +
+        " / " +
+        state.totalPages +
+        "</span>" +
+        '<button type="button" data-act="next"' +
+        (state.page >= state.totalPages ? " disabled" : "") +
+        ">下一页</button>";
+      el.querySelector('[data-act="prev"]').onclick = () =>
+        onChange(state.page - 1);
+      el.querySelector('[data-act="next"]').onclick = () =>
+        onChange(state.page + 1);
+    }
+
+    let selectedDate = chinaTodayStr();
+    let allProblems = [];
+    let problemsQuery = "";
+    let problemsPage = 1;
+    let wrongList = [];
+    let wrongPage = 1;
+    let problemsLoaded = false;
+
+    function isViewingToday() {
+      return selectedDate === chinaTodayStr();
+    }
+
+    function dayWord() {
+      return isViewingToday() ? "今日" : selectedDate;
+    }
+
+    function syncDayControls() {
+      document.getElementById("day_picker").value = selectedDate;
+      document.getElementById("day_heading").textContent = isViewingToday()
+        ? "今日"
+        : selectedDate;
+      document.getElementById("btn-today").disabled = isViewingToday();
+      document.getElementById("btn-next").disabled = isViewingToday();
+      const w = dayWord();
+      document.getElementById("lbl_sub").textContent = w + "提交";
+      document.getElementById("lbl_ac").textContent = w + "通过";
+      document.getElementById("h_items").textContent = w + "题目";
+      document.getElementById("h_wrong").textContent = w + "错题";
+    }
+
     function formatStatusCounts(counts) {
       return Object.entries(counts || {})
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -153,10 +341,154 @@
       );
     }
 
-    async function refresh() {
+    function aggregateDayProblems(items) {
+      const map = new Map();
+      for (const item of items) {
+        const pid = item.problem_id;
+        let row = map.get(pid);
+        if (!row) {
+          row = {
+            problem_id: pid,
+            title: item.title,
+            difficulty: item.difficulty,
+            attempts: 0,
+            accepted: false,
+            bestRuntime: null,
+          };
+          map.set(pid, row);
+        }
+        row.attempts += 1;
+        if (item.status === "Accepted") {
+          row.accepted = true;
+          if (
+            item.runtime_ms != null &&
+            (row.bestRuntime == null || item.runtime_ms < row.bestRuntime)
+          ) {
+            row.bestRuntime = item.runtime_ms;
+          }
+        }
+      }
+      return Array.from(map.values());
+    }
+
+    function filterProblems(list, q) {
+      const raw = (q || "").trim().toLowerCase();
+      if (!raw) return list;
+      return list.filter((p) => {
+        const idStr = String(p.problem_id);
+        const title = String(p.title || "").toLowerCase();
+        if (idStr.includes(raw)) return true;
+        if (title.includes(raw)) return true;
+        return false;
+      });
+    }
+
+    function renderProblemsTable() {
+      const tbody = document.getElementById("problems");
+      const pager = document.getElementById("problems_pager");
+      const filtered = filterProblems(allProblems, problemsQuery);
+      if (!allProblems.length) {
+        tbody.innerHTML = '<tr><td colspan="6">暂无题目记录</td></tr>';
+        renderPager(pager, { total: 0 }, () => {});
+        return;
+      }
+      if (!filtered.length) {
+        tbody.innerHTML = '<tr><td colspan="6">无匹配题目</td></tr>';
+        renderPager(pager, { total: 0 }, () => {});
+        return;
+      }
+      const pageState = paginate(filtered, problemsPage, PAGE_SIZE);
+      problemsPage = pageState.page;
+      tbody.innerHTML = pageState.items
+        .map((p) => {
+          const struggle = Math.round((p.struggle_score || 0) * 100) + "%";
+          return (
+            "<tr><td>" +
+            problemLink(p.problem_id, p.title) +
+            "</td><td>" +
+            (p.difficulty || "-") +
+            "</td><td>" +
+            p.total_attempts +
+            "</td><td>" +
+            p.accepted_count +
+            "</td><td>" +
+            struggle +
+            "</td><td>" +
+            (p.last_submitted_at || "—") +
+            "</td></tr>"
+          );
+        })
+        .join("");
+      renderPager(pager, pageState, (next) => {
+        problemsPage = next;
+        renderProblemsTable();
+      });
+    }
+
+    function renderWrongTable() {
+      const tbody = document.getElementById("wrong");
+      const pager = document.getElementById("wrong_pager");
+      if (!wrongList.length) {
+        tbody.innerHTML =
+          '<tr><td colspan="3">' + dayWord() + "无错题</td></tr>";
+        renderPager(pager, { total: 0 }, () => {});
+        return;
+      }
+      const pageState = paginate(wrongList, wrongPage, PAGE_SIZE);
+      wrongPage = pageState.page;
+      tbody.innerHTML = pageState.items
+        .map(
+          (i) =>
+            "<tr><td>" +
+            problemLink(i.problem_id, i.title) +
+            "</td><td>" +
+            (i.difficulty || "-") +
+            "</td><td>" +
+            formatStatusCounts(i.status_counts) +
+            "</td></tr>"
+        )
+        .join("");
+      renderPager(pager, pageState, (next) => {
+        wrongPage = next;
+        renderWrongTable();
+      });
+    }
+
+    function setSelectedDate(iso, { reloadProblems } = {}) {
+      selectedDate = iso;
+      wrongPage = 1;
+      syncDayControls();
+      refresh({ reloadProblems: !!reloadProblems });
+    }
+
+    async function loadProblems() {
+      const tbody = document.getElementById("problems");
       try {
-        const res = await fetch("/api/stats");
+        const pres = await fetch("/api/problems");
+        const pdata = await pres.json();
+        allProblems = pdata.problems || [];
+        problemsLoaded = true;
+        renderProblemsTable();
+      } catch {
+        allProblems = [];
+        tbody.innerHTML = '<tr><td colspan="6">无法加载题目列表</td></tr>';
+        renderPager(document.getElementById("problems_pager"), { total: 0 }, () => {});
+      }
+    }
+
+    async function refresh(opts) {
+      const reloadProblems = opts && opts.reloadProblems;
+      try {
+        const url = "/api/stats?date=" + encodeURIComponent(selectedDate);
+        const res = await fetch(url);
         const data = await res.json();
+        if (!res.ok) throw new Error(data.message || "请求失败");
+
+        if (data.date) {
+          selectedDate = data.date;
+          syncDayControls();
+        }
+
         document.getElementById("today_sub").textContent = data.today_submissions;
         document.getElementById("today_ac").textContent =
           data.today_accepted + " (" + data.today_acceptance_rate + "%)";
@@ -171,60 +503,64 @@
           .map((d) => {
             const h = Math.max(4, Math.round((d.submissions / max) * 80));
             const label = d.date.slice(5);
-            return '<div class="bar" style="height:' + h + 'px"><span>' + label + "</span></div>";
+            const active = d.date === selectedDate ? " active" : "";
+            return (
+              '<div class="bar' +
+              active +
+              '" style="height:' +
+              h +
+              'px" data-date="' +
+              d.date +
+              '" title="' +
+              d.date +
+              " · 提交 " +
+              d.submissions +
+              '"><span>' +
+              label +
+              "</span></div>"
+            );
           })
           .join("");
+        document.querySelectorAll("#bars .bar").forEach((el) => {
+          el.onclick = () => setSelectedDate(el.dataset.date);
+        });
 
-        const problems = document.getElementById("problems");
-        try {
-          const pres = await fetch("/api/problems");
-          const pdata = await pres.json();
-          const list = pdata.problems || [];
-          if (!list.length) {
-            problems.innerHTML = '<tr><td colspan="6">暂无题目记录</td></tr>';
-          } else {
-            problems.innerHTML = list
-              .map((p) => {
-                const struggle = Math.round((p.struggle_score || 0) * 100) + "%";
-                return (
-                  "<tr><td>" +
-                  problemLink(p.problem_id, p.title) +
-                  "</td><td>" +
-                  (p.difficulty || "-") +
-                  "</td><td>" +
-                  p.total_attempts +
-                  "</td><td>" +
-                  p.accepted_count +
-                  "</td><td>" +
-                  struggle +
-                  "</td><td>" +
-                  (p.last_submitted_at || "—") +
-                  "</td></tr>"
-                );
-              })
-              .join("");
-          }
-        } catch {
-          problems.innerHTML = '<tr><td colspan="6">无法加载题目列表</td></tr>';
-        }
-
-        const wrong = document.getElementById("wrong");
-        if (!data.today_wrong.length) {
-          wrong.innerHTML = '<tr><td colspan="3">今日无错题</td></tr>';
+        const items = document.getElementById("day_items");
+        const aggregated = aggregateDayProblems(data.today_items || []);
+        if (!aggregated.length) {
+          items.innerHTML =
+            '<tr><td colspan="5">' + dayWord() + "暂无提交</td></tr>";
         } else {
-          wrong.innerHTML = data.today_wrong
-            .map(
-              (i) =>
+          items.innerHTML = aggregated
+            .map((row) => {
+              const result = row.accepted
+                ? '<span class="ok">已通过</span>'
+                : '<span class="fail">未通过</span>';
+              const runtime =
+                row.bestRuntime != null ? row.bestRuntime + "ms" : "—";
+              return (
                 "<tr><td>" +
-                problemLink(i.problem_id, i.title) +
+                problemLink(row.problem_id, row.title) +
                 "</td><td>" +
-                (i.difficulty || "-") +
+                (row.difficulty || "-") +
                 "</td><td>" +
-                formatStatusCounts(i.status_counts) +
+                row.attempts +
+                "</td><td>" +
+                result +
+                "</td><td>" +
+                runtime +
                 "</td></tr>"
-            )
+              );
+            })
             .join("");
         }
+
+        if (reloadProblems || !problemsLoaded) {
+          await loadProblems();
+        }
+
+        wrongList = data.today_wrong || [];
+        renderWrongTable();
 
         const recent = document.getElementById("recent");
         recent.innerHTML = (data.recent || [])
@@ -247,8 +583,31 @@
         document.getElementById("status").textContent = "无法读取统计：" + err;
       }
     }
-    refresh();
-    setInterval(refresh, 3000);
+
+    document.getElementById("btn-prev").onclick = () =>
+      setSelectedDate(shiftDate(selectedDate, -1));
+    document.getElementById("btn-next").onclick = () => {
+      if (isViewingToday()) return;
+      const next = shiftDate(selectedDate, 1);
+      const today = chinaTodayStr();
+      setSelectedDate(next > today ? today : next);
+    };
+    document.getElementById("btn-today").onclick = () =>
+      setSelectedDate(chinaTodayStr());
+    document.getElementById("day_picker").onchange = (e) => {
+      if (e.target.value) setSelectedDate(e.target.value);
+    };
+    document.getElementById("problems_q").oninput = (e) => {
+      problemsQuery = e.target.value;
+      problemsPage = 1;
+      renderProblemsTable();
+    };
+
+    syncDayControls();
+    refresh({ reloadProblems: true });
+    setInterval(() => {
+      if (isViewingToday()) refresh();
+    }, 3000);
   </script>
 </body>
 </html>

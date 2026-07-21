@@ -43,6 +43,27 @@
     h2 { margin: 0 0 8px; font-size: 16px; }
     p.hint { margin: 0 0 12px; font-size: 13px; color: var(--muted); line-height: 1.45; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    label.field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      min-width: 200px;
+      flex: 1;
+    }
+    label.field > span { font-weight: 500; color: var(--ink); }
+    input[type="text"], input[type="password"], select {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 13px;
+      background: #fff;
+      color: var(--ink);
+    }
+    .radio-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; font-size: 13px; }
+    .radio-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--ink); }
+    #llm-api-fields[hidden] { display: none !important; }
     button {
       border: 1px solid var(--line);
       background: #fff;
@@ -105,15 +126,40 @@
     </section>
 
     <section>
-      <h2>今日日报</h2>
-      <p class="hint">生成 Markdown 快照并在此预览（写入配置中的 report_dir）。</p>
-      <div class="row">
-        <button type="button" class="primary" id="btn-report">生成今日日报</button>
-        <button type="button" class="warn" id="btn-report-clean-today">清理今日日报</button>
-        <button type="button" class="danger" id="btn-report-clean-all">清理全部日报</button>
+      <h2>陪练模型</h2>
+      <p class="hint">
+        默认本地 Ollama。也可填写 DeepSeek API Key（明文保存在本机
+        <code>~/.config/leetcode-tracker/config.json</code>）。采集流程不受影响。
+      </p>
+      <div class="radio-row">
+        <label><input type="radio" name="llm-provider" value="ollama" checked /> 本地 Ollama</label>
+        <label><input type="radio" name="llm-provider" value="api" /> DeepSeek API</label>
       </div>
-      <div class="msg" id="report-msg"></div>
-      <pre class="out" id="report-out" hidden></pre>
+      <div class="row" style="margin-bottom: 10px;">
+        <label class="field">
+          <span>模型名</span>
+          <input type="text" id="llm-model" placeholder="qwen2.5:7b-instruct-q4_K_M / deepseek-chat" />
+        </label>
+      </div>
+      <div id="llm-api-fields" hidden>
+        <div class="row" style="margin-bottom: 10px;">
+          <label class="field">
+            <span>API Key</span>
+            <input type="password" id="llm-api-key" placeholder="留空则保留已保存的 Key" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Base URL（可选）</span>
+            <input type="text" id="llm-base-url" placeholder="默认 https://api.deepseek.com" />
+          </label>
+        </div>
+        <p class="hint" id="llm-key-status">当前未保存 API Key</p>
+      </div>
+      <div class="row">
+        <button type="button" class="primary" id="btn-llm-save">保存</button>
+        <button type="button" id="btn-llm-test">测试连接</button>
+        <button type="button" class="danger" id="btn-llm-clear">一键清除 Key</button>
+      </div>
+      <div class="msg" id="llm-msg"></div>
     </section>
 
     <section>
@@ -171,6 +217,49 @@
       }
     }
 
+    function selectedProvider() {
+      const el = document.querySelector('input[name="llm-provider"]:checked');
+      return el ? el.value : "ollama";
+    }
+
+    function syncProviderUi() {
+      const api = selectedProvider() === "api";
+      document.getElementById("llm-api-fields").hidden = !api;
+      const model = document.getElementById("llm-model");
+      if (api && (!model.value || model.value.includes("qwen"))) {
+        if (!model.dataset.touched) model.value = "deepseek-chat";
+      }
+      const hasSaved = document.getElementById("llm-key-status").dataset.hasKey === "1";
+      const typed = document.getElementById("llm-api-key").value.trim().length > 0;
+      const testBtn = document.getElementById("btn-llm-test");
+      testBtn.disabled = api && !hasSaved && !typed;
+      testBtn.title = testBtn.disabled
+        ? "请先填写并保存 API Key"
+        : "使用当前已保存配置测试";
+    }
+
+    function applyLlmForm(cfg) {
+      const llm = (cfg && cfg.llm) || {};
+      const provider = llm.provider === "api" ? "api" : "ollama";
+      document.querySelectorAll('input[name="llm-provider"]').forEach((el) => {
+        el.checked = el.value === provider;
+      });
+      const model = document.getElementById("llm-model");
+      model.value = llm.coach_model || "";
+      model.dataset.touched = "";
+      document.getElementById("llm-api-key").value = "";
+      document.getElementById("llm-base-url").value = llm.base_url || "";
+      const status = document.getElementById("llm-key-status");
+      if (llm.has_api_key) {
+        status.textContent = "已保存 Key：" + (llm.api_key || "***");
+        status.dataset.hasKey = "1";
+      } else {
+        status.textContent = "当前未保存 API Key";
+        status.dataset.hasKey = "0";
+      }
+      syncProviderUi();
+    }
+
     async function loadConfig() {
       setMsg("config-msg", "加载中…");
       try {
@@ -178,19 +267,21 @@
         const data = await res.json();
         if (data.status !== "ok") throw new Error(data.message || "failed");
         const cfg = data.config || {};
+        const llm = cfg.llm || {};
         const rows = [
           ["host", cfg.host],
           ["port", cfg.port],
-          ["report_dir", cfg.report_dir],
-          ["report_time", cfg.report_time],
           ["autostart", String(cfg.autostart)],
-          ["llm.provider", (cfg.llm || {}).provider],
-          ["llm.coach_model", (cfg.llm || {}).coach_model],
+          ["llm.provider", llm.provider],
+          ["llm.api_provider", llm.api_provider || "—"],
+          ["llm.coach_model", llm.coach_model],
+          ["llm.has_api_key", String(!!llm.has_api_key)],
           ["db_path", cfg.db_path_readonly],
         ];
         document.getElementById("config-dl").innerHTML = rows
           .map(([k, v]) => "<dt>" + k + "</dt><dd>" + (v == null ? "—" : v) + "</dd>")
           .join("");
+        applyLlmForm(cfg);
         setMsg("config-msg", "已更新", "ok");
       } catch (err) {
         setMsg("config-msg", String(err), "err");
@@ -198,42 +289,95 @@
     }
 
     document.getElementById("btn-config").onclick = () => loadConfig();
+    document.querySelectorAll('input[name="llm-provider"]').forEach((el) => {
+      el.addEventListener("change", syncProviderUi);
+    });
+    document.getElementById("llm-model").addEventListener("input", function () {
+      this.dataset.touched = "1";
+    });
+    document.getElementById("llm-api-key").addEventListener("input", syncProviderUi);
 
-    document.getElementById("btn-report").onclick = function () {
+    document.getElementById("btn-llm-save").onclick = function () {
       const btn = this;
       withBusy(btn, async () => {
-        setMsg("report-msg", "生成中…");
+        setMsg("llm-msg", "保存中…");
         try {
-          const { data } = await postJson("/api/ops/report/today", {});
+          const provider = selectedProvider();
+          const body = {
+            provider,
+            api_provider: provider === "api" ? "deepseek" : "",
+            coach_model: document.getElementById("llm-model").value.trim(),
+            base_url: document.getElementById("llm-base-url").value.trim(),
+            api_key: document.getElementById("llm-api-key").value,
+          };
+          const { data } = await postJson("/api/ops/llm/config", body);
           if (data.status !== "ok") throw new Error(data.message || "failed");
-          const out = document.getElementById("report-out");
-          out.hidden = false;
-          out.textContent = data.markdown || "";
-          setMsg("report-msg", "已写入 " + data.path, "ok");
+          document.getElementById("llm-api-key").value = "";
+          applyLlmForm(data.config || {});
+          setMsg("llm-msg", "已保存陪练模型配置", "ok");
+          loadConfig();
         } catch (err) {
-          setMsg("report-msg", String(err), "err");
+          setMsg("llm-msg", String(err), "err");
         }
       });
     };
 
-    async function cleanReports(todayOnly) {
-      const label = todayOnly ? "今日日报" : "全部日报";
-      if (!confirm("确认删除" + label + "？此操作不可恢复。")) return;
-      setMsg("report-msg", "清理中…");
-      try {
-        const { data } = await postJson("/api/ops/report/clean", {
-          confirm: true,
-          today_only: todayOnly,
-        });
-        if (data.status !== "ok") throw new Error(data.message || "failed");
-        setMsg("report-msg", "已删除 " + data.count + " 个文件", "ok");
-      } catch (err) {
-        setMsg("report-msg", String(err), "err");
+    document.getElementById("btn-llm-test").onclick = function () {
+      const btn = this;
+      if (btn.disabled) return;
+      const api = selectedProvider() === "api";
+      const hasSaved = document.getElementById("llm-key-status").dataset.hasKey === "1";
+      const typed = document.getElementById("llm-api-key").value.trim().length > 0;
+      if (api && !hasSaved && !typed) {
+        setMsg("llm-msg", "请先填写并保存 API Key 后再测试", "err");
+        return;
       }
-    }
+      if (api && typed && !hasSaved) {
+        setMsg("llm-msg", "请先点击「保存」，再用已保存配置测试连接", "err");
+        return;
+      }
+      withBusy(btn, async () => {
+        setMsg("llm-msg", "测试中…");
+        try {
+          const { data } = await postJson("/api/ops/llm/test", {});
+          if (data.status !== "ok") throw new Error(data.message || "failed");
+          setMsg(
+            "llm-msg",
+            "连接成功 · " +
+              data.provider +
+              (data.api_provider ? "/" + data.api_provider : "") +
+              " · " +
+              data.coach_model +
+              " · " +
+              (data.reply_preview || "").replace(/\s+/g, " ").slice(0, 60),
+            "ok"
+          );
+        } catch (err) {
+          setMsg("llm-msg", String(err), "err");
+        }
+      });
+    };
 
-    document.getElementById("btn-report-clean-today").onclick = () => cleanReports(true);
-    document.getElementById("btn-report-clean-all").onclick = () => cleanReports(false);
+    document.getElementById("btn-llm-clear").onclick = function () {
+      const btn = this;
+      if (!confirm("确认清除 API Key，并切回本地 Ollama？")) return;
+      withBusy(btn, async () => {
+        setMsg("llm-msg", "清除中…");
+        try {
+          const { data } = await postJson("/api/ops/llm/clear-key", {
+            confirm: true,
+            switch_to_ollama: true,
+          });
+          if (data.status !== "ok") throw new Error(data.message || "failed");
+          document.getElementById("llm-api-key").value = "";
+          applyLlmForm(data.config || {});
+          setMsg("llm-msg", data.message || "已清除", "ok");
+          loadConfig();
+        } catch (err) {
+          setMsg("llm-msg", String(err), "err");
+        }
+      });
+    };
 
     document.getElementById("btn-logs").onclick = function () {
       const btn = this;

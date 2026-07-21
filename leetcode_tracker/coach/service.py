@@ -15,9 +15,17 @@ from leetcode_tracker.coach.debug_log import log_llm_turn
 from leetcode_tracker.coach.guardrail import apply_code_block_guardrail
 from leetcode_tracker.coach.opening import template_opening
 from leetcode_tracker.coach.prompts import system_prompt_for_status
-from leetcode_tracker.coach.sessions import get_or_create_session, get_session, touch_session
-from leetcode_tracker.llm.provider import build_chat_model
+from leetcode_tracker.coach.sessions import (
+    abandon_session,
+    get_or_create_session,
+    get_session,
+    is_session_abandoned,
+    touch_session,
+)
+from leetcode_tracker.infra.config import switch_to_ollama_keep_key
+from leetcode_tracker.infra.db import init_db as _init_db_for_failover
 from leetcode_tracker.infra.paths import db_path
+from leetcode_tracker.llm.provider import build_chat_model, get_llm_settings
 
 _END_PHRASES = ("结束", "够了", "先这样", "不用了", "谢谢")
 _SESSION_LOCKS: dict[str, threading.Lock] = {}
@@ -30,6 +38,7 @@ class CoachState(MessagesState):
     done: bool
     fallback_turn_count: int
     generation_error: str
+    provider_failover: bool
 
 
 class GenerationCancelled(Exception):
@@ -140,10 +149,12 @@ def _graph_for_turn(
                 "done": False,
                 "fallback_turn_count": fallback_turn,
                 "generation_error": "",
+                "provider_failover": False,
             }
         except GenerationCancelled:
             raise
         except Exception as exc:  # noqa: BLE001
+            was_api = get_llm_settings().get("provider") == "api"
             log_llm_turn(
                 session_id=session_id,
                 thread_id=thread_id,
@@ -154,12 +165,14 @@ def _graph_for_turn(
                     "fallback_turn": fallback_turn,
                     "submission_status": status,
                     "prompt_mode": "ac" if status == "Accepted" else "debug",
+                    "provider_failover": was_api,
                 },
             )
             return {
                 "done": False,
                 "fallback_turn_count": fallback_turn,
                 "generation_error": str(exc),
+                "provider_failover": was_api,
             }
 
     def route_after_reply(state: CoachState) -> str:
@@ -167,8 +180,52 @@ def _graph_for_turn(
 
     def fallback_reply(state: CoachState) -> dict[str, Any]:
         fallback_turn = int(state.get("fallback_turn_count") or 0)
-        reply = _fallback_reply(fallback_turn)
         err = str(state.get("generation_error") or "unknown error")
+        failover = bool(state.get("provider_failover"))
+
+        if failover:
+            switch_to_ollama_keep_key()
+            failover_conn = _init_db_for_failover()
+            try:
+                abandon_session(failover_conn, session_id)
+            finally:
+                failover_conn.close()
+            reply = (
+                "DeepSeek 暂时不可达"
+                + (f"（{err}）" if err else "")
+                + "。已将设置切回本地 Ollama（API Key 仍保留）。"
+                "本对话已结束，请关闭本页后重新打开陪练再继续。"
+            )
+            log_llm_turn(
+                session_id=session_id,
+                thread_id=thread_id,
+                messages=list(state.get("messages") or []),
+                reply=reply,
+                error=err,
+                meta={
+                    "node": "fallback_reply",
+                    "provider_failover": True,
+                    "session_abandoned": True,
+                },
+            )
+            get_stream_writer()(
+                {
+                    "type": "fallback",
+                    "text": reply,
+                    "message": "DeepSeek 不可达，已切回本地 Ollama；请重新打开陪练。",
+                    "reopen_required": True,
+                    "session_abandoned": True,
+                }
+            )
+            return {
+                "messages": [AIMessage(content=reply)],
+                "done": True,
+                "fallback_turn_count": fallback_turn + 1,
+                "generation_error": "",
+                "provider_failover": False,
+            }
+
+        reply = _fallback_reply(fallback_turn)
         log_llm_turn(
             session_id=session_id,
             thread_id=thread_id,
@@ -189,6 +246,7 @@ def _graph_for_turn(
             "done": False,
             "fallback_turn_count": fallback_turn + 1,
             "generation_error": "",
+            "provider_failover": False,
         }
 
     builder = StateGraph(CoachState)
@@ -319,6 +377,14 @@ def chat_stream(
     session = get_session(conn, session_id)
     if session is None:
         yield {"type": "error", "message": f"未找到会话: {session_id}"}
+        return
+    if is_session_abandoned(session):
+        yield {
+            "type": "error",
+            "code": "session_abandoned",
+            "message": "本对话已结束（云端不可达后已切回本地）。请重新打开陪练再继续。",
+            "reopen_required": True,
+        }
         return
 
     owns_lock = not lock_acquired

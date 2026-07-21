@@ -29,7 +29,7 @@ def run_server(host: Optional[str] = None, port: Optional[int] = None) -> None:
     print("           GET /api/stats  GET /api/ops/config  GET /health")
     print("           POST /submit  (capture only)")
     print("           POST /api/coach/prepare  POST /api/coach/stream (SSE)")
-    print("           POST /api/ops/report/today  POST /api/ops/logs/clean …")
+    print("           POST /api/ops/logs/clean …")
     try:
         uvicorn.run(
             _UVICORN_APP,

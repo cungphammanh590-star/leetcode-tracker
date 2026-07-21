@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import date
+from typing import Any, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from leetcode_tracker.infra.db import init_db
@@ -22,12 +23,24 @@ router = APIRouter()
 
 
 @router.get("/api/stats")
-def api_stats() -> Any:
+def api_stats(date_q: Optional[str] = Query(None, alias="date")) -> Any:
+    day: Optional[date] = None
+    if date_q is not None and date_q.strip():
+        try:
+            day = date.fromisoformat(date_q.strip())
+        except ValueError:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "message": "无效日期，请使用 YYYY-MM-DD",
+                },
+            )
     try:
         conn = init_db()
         try:
             ensure_stats_materialized(conn)
-            stats = get_overview(conn)
+            stats = get_overview(conn, day=day)
         finally:
             conn.close()
         return overview_to_dict(stats)
