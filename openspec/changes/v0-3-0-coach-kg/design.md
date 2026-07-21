@@ -1,143 +1,176 @@
 ## Context
 
-v0.2.0 已有：`submissions` 事实表、`problem_stats` / `problem_daily_stats` 派生画像、`GET /api/problems/{id}/llm-context`、浏览器仪表盘与扩展采集链路。尚无知识图谱与陪练能力。
+v0.2.0 已有：`submissions` 事实表、`problem_stats` / `problem_daily_stats` 派生画像、`GET /api/problems/{id}/llm-context`、浏览器仪表盘与扩展采集链路。v0.3.0 已落地知识图谱导入、Coach 包骨架、模板 `engage` / POST `chat`、popup hint；但首句仍为模板、续聊非 SSE，且 tasks/spec 与「采集解耦」决议曾互相矛盾。
 
-外部数据源调研结论：
+2026-07-17 采集故障证明：把陪练、端口发现、队列、重试、`engage` 叠进扩展采集热路径会导致 MV3 Service Worker 下投递不稳定。恢复方案是采集只走 `/submit`。本设计在**保留该边界**的前提下，明确「挨个调、全部解耦」的第二/第三接口：先入库，再 `prepare`（只创建/复用模板会话），用户发送 stream 消息时才首次调用模型。
 
-- **algorithm-stone**（主选）：`map/leetcode/*.txt` 含 14 条路线图、103 子模块、~902 题、~1027 条顺序边；题号为 frontend id，与 tracker `problem_id` 一致；含 `key=` / `star=` 行内标注。
-- **LeetCode Visualizer**：仅为扁平 `problem → tags[]` 进度图，非图谱，且 ID 为内部 question_id，**不导入**。
+外部数据源：algorithm-stone `map/leetcode/*.txt`（frontend id 与 `problem_id` 一致）。不导入 LeetCode Visualizer。
 
-约束：macOS + leetcode.cn；Neo 8GB；陪练本地优先；Tutor 讲题系统本版不做；扩展 MVP 为「通知 + 打开本机陪练页」，非力扣侧栏。
+约束：macOS + leetcode.cn；Neo 8GB；陪练本地优先；Tutor 本版不做；无常驻侧栏（v0.3.1）。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- 将 algorithm-stone 学习路径导入 SQLite，与用户刷题记录 JOIN 出 track/node 级进度。
-- Coach 陪练：提交后短对话、苏格拉底式、结合图谱位置判断薄弱点。
-- LangGraph + Ollama 7B Q4 默认可用；config 预留 API。
-- CLI 与 `8763` 桥接 API 先行；扩展异步 engage。
+- 图谱导入 SQLite，与 `problem_stats` JOIN 出 track/node 进度。
+- 接口解耦、顺序调用：`/submit` → `/api/coach/prepare` → SSE `/api/coach/stream`。
+- `prepare` 在入库成功后只读数据库，原子创建/复用模板 opening 会话并立即返回，不加载或调用 LLM。
+- 用户发送第一条 stream 消息时才首次调用模型；LangGraph 负责路由、token stream、checkpoint、结束语与模型失败 fallback。
+- 采集失败与陪练失败互不影响；`/submit` 永不调用 LLM。
+- CLI 与本机陪练页可用；扩展在 `/submit` 成功后再单独调 `prepare`。
 
 **Non-Goals:**
 
-- Tutor 讲题、深度 code review、默认云端 LLM。
-- 图谱可视化、向量库、LeetCode Visualizer 导入。
-- 力扣页常驻侧栏（v0.3.1）。
-- 独立 coach 端口（MVP 与 bridge 同进程）。
+- Tutor、深度 code review、默认云端 LLM。
+- 图谱可视化、向量库、Visualizer 导入。
+- 力扣页常驻侧栏。
+- 独立 coach 端口（与 bridge 同进程）。
+- 单一接口同时入库 + LLM。
+- 恢复 content 直连 bridge、Port 长连、双队列等已回退机制。
 
 ## Decisions
 
 ### D1：图谱与用户数据同库、分表
 
-- **决定**：在现有 `leetcode.db` 新增 `kg_tracks`、`kg_nodes`、`kg_node_problems`、`kg_edges`；图谱为只读参考层，importer 可重复执行（先清空 kg 表再导入）。
+- **决定**：`leetcode.db` 新增 `kg_tracks`、`kg_nodes`、`kg_node_problems`、`kg_edges`、`kg_meta`；importer 可重复执行（先清空 kg 表再导入）。
 - **理由**：陪练需 JOIN `problem_stats`；单文件备份简单。
-- **备选**：独立 `kg.db` — 增加连接与事务复杂度，MVP 不采用。
 
 ### D2：图谱源仅 algorithm-stone map 文本
 
-- **决定**：bundled 路径 `leetcode_tracker/data/algorithm_stone/maps/`（从上游 map 复制并注明 LICENSE/版本）；`leetcode-tracker kg import` 解析 `[根]`、`[-子模块]`、题号、`(key=...)` 语法，不依赖 graphviz/zhon。
-- **理由**：map 文件是 source of truth；SVG 为生成物。
-- **标注**：`annotation` 存原始括号内文本（如 `前缀和`、`star=5`）。
+- **决定**：bundled `leetcode_tracker/data/algorithm_stone/maps/`；`kg import` 解析文本语法，不依赖 graphviz/zhon。
+- **标注**：`annotation` 存原始括号内文本。
 
 ### D3：图谱 ID 与多 track 归属
 
-- **决定**：`kg_nodes.id` = `{track_id}::{sort_order}::{submodule_name}`（同名子模块可共存）；一题可出现在多 track，`kg_node_problems` 用 `(node_id, problem_id)` 主键；同子模块内重复题号导入时去重。
-- **理由**：与 algorithm-stone 拓扑一致；陪练可说明「这题在 DP 路线的子数组模块」。
+- **决定**：`kg_nodes.id` = `{track_id}::{sort_order}::{submodule_name}`；一题可多 track；同子模块重复题号去重。
 
 ### D4：进度查询复用 problem_stats
 
-- **决定**：`kg progress` 不新建用户事实表；按 node 聚合：`COUNT` 图谱题数、`SUM(has_ac)` 来自 `problem_stats.accepted_count > 0`、挣扎度取 node 内 `struggle_score` 均值。
-- **理由**：避免双写；与 v0.2.0 画像一致。
+- **决定**：不新建用户事实表；`accepted_count > 0` 计完成；挣扎度取 node 内均值。
 
 ### D5：Coach context 分层
 
-- **决定**：`build_coach_context(submission_id)` 输出 Markdown 块：
-  1. 本次提交（status、今日第几次、语言、runtime）
-  2. 图谱位置（track、node、序位、annotation、前序题 AC 情况）
-  3. 子模块进度（AC 数/总数、node 挣扎均值）
-  - **默认不含完整 code**；用户显式要求看代码时，Coach 仍只引导思考，不跨进 Tutor。
-- **理由**：8GB 上控制 token；陪练 ≠ 讲题。
+- **决定**：`build_coach_context(submission_id)` 含：本次提交、图谱位置、子模块进度；**默认不含完整 code**。
 
-### D6：LangGraph 陪练图（coach 包）
+### D6：LangGraph 陪练（coach 包）
 
-- **决定**：`leetcode_tracker/coach/` 独立包；图节点：
-  - `load_context`（tool）
-  - `classify_moment`（AC / WA / TLE / CE / 多错后 AC）
-  - `coach_reply`（LLM，system 硬约束防泄题）
-  - 条件边：用户继续 → `coach_reply`；用户结束 → `summarize`
-- **Checkpointer**：与主库同文件 `leetcode.db` 内陪练 checkpoint 表（LangGraph SqliteSaver 指向同库路径）；不单独维护 `coach_sessions.db`。
-- **备选**：单 prompt 链 — 难控多轮与状态，不采用。
+- **决定**：逻辑在 `leetcode_tracker/coach/`；checkpointer 指向同库 `leetcode.db`。
+- **准备**：`prepare` 仅生成确定性模板 opening 并创建/复用会话，不编译模型、不调用 Ollama。
+- **正式执行边界**：第一条及后续用户消息均进入 LangGraph；图必须负责意图/结束语路由、模型 token stream、checkpoint 写入、确定性结束语和模型失败 fallback。生产流不得在图外直接调用 `model.stream` 后再手工回填状态。
+- **续聊**：SSE `stream` 在同一 `thread_id` / `session_id` 上多轮；结束语由图路由到确定性收束节点，不调用模型。
 
 ### D7：LLM 提供方
 
-- **决定**：`leetcode_tracker/llm/provider.py` 抽象；默认 `provider=ollama`，`coach_model=qwen2.5:7b-instruct-q4_K_M`；`api_provider` 与 `api_key` 配置项存在但默认空，MVP 代码路径不调用。
-- **理由**：本地优先；Neo 8GB 可跑 7B Q4；图谱判断不依赖 LLM。
+- **决定**：默认 `provider=ollama`，`coach_model=qwen2.5:7b-instruct-q4_K_M`；`api_*` 占位默认空，MVP 不调用云端。
+- **网络边界**：Ollama base URL 必须解析为 loopback（`127.0.0.1`、`::1` 或 `localhost`）；客户端显式不读取/不使用 HTTP(S) 代理，并设置有限请求 timeout，超时进入图内确定性 fallback。
 
-### D8：HTTP 与扩展集成（采集 / 陪练解耦）
+### D8：三接口解耦（采集 / 准备 / 对话）——修订基准
 
-- **决定**：在现有 `ThreadingHTTPServer` 增加：
-  - `POST /api/coach/engage` — body: `{submission_id}`；返回 `{session_id, opening, problem_id}`（**仅陪练页/CLI 按需调用**）
-  - `POST /api/coach/chat` — body: `{session_id, message}`；返回 `{reply, done?}`
-  - `GET /coach` — 静态陪练页，query `submission` 或 `session`
-- **扩展**：`/submit` 成功后**只** badge + 通知「提交已记录」+ 深链打开陪练页；**不**在提交热路径调用 engage / LLM。
-- **开场白**：用户打开陪练页时 `engage` 读库拼上下文 + **模板**开场；用户发送首条消息后 `/api/coach/chat` 才调用 LangGraph + Ollama。
-- **理由**：采集与陪练完全解耦；入库不被陪练拖慢；慢一步（打开页面 / 日后消息队列）均可接受。
+- **决定**：三个独立 HTTP 契约，**禁止合并**：
+
+| 顺序 | 接口 | 职责 | 调用方 |
+|------|------|------|--------|
+| 1 | `POST /submit` | 只写 `problems`/`submissions`/stats | 扩展采集热路径（唯一同步副作用） |
+| 2 | `POST /api/coach/prepare` | 读库 → 原子创建/复用 `session_id` + 模板 `opening`；不调用 LLM | `/submit` **成功之后**另一次调用；或 CLI/陪练页补调 |
+| 3 | SSE `/api/coach/stream` | 首次及后续模型对话；LangGraph 路由并流式输出 | 陪练页 / CLI |
+
+- **扩展时序（挨个调）**：
+
+```text
+content → background → POST /submit
+       → 成功：badge + 通知 + sendResponse(ok)
+       → 另一次：POST /api/coach/prepare { submission_id, problem_id }
+         （不阻塞上一步成功语义；失败只打日志，不改 badge、不弹「投递失败」）
+用户点陪练 → GET /coach?submission=...&problem_id=...
+       → 若已有 session：展示模板 opening；否则页内再调 prepare
+       → 用户发送消息后才走 SSE /api/coach/stream 并首次调用模型
+```
+
+- **明确禁止**：
+  - `/submit` handler 内调用 prepare / LLM / SSE；
+  - content script 直连 bridge；
+  - 为采集再引入 Port 长连、双队列、storage 冲刷连环路径；
+  - prepare 失败覆盖采集成功态。
+
+- **prepare 输入与回退**：优先使用有效的已入库 `submission_id`；未提供 submission 时，允许显式 `problem_id`，并选择该题 `submitted_at` 最新（再以稳定键打破平局）的已入库提交；找不到时返回明确错误且不创建空会话。
+- **幂等与原子性**：同一 submission 的并发/重复 prepare 必须由数据库唯一约束或等价事务保证只产生一个规范会话；冲突方读取并复用已提交行，返回同一 `session_id` 和 opening。
+- **与旧决议差异**：此前「prepare + LLM 首句」改为「prepare 仅模板，首条 stream 消息才调用模型」；**采集热路径仍只 `/submit`**，符合事故复盘。
+
+- **兼容**：现有 `POST /api/coach/engage`（模板）与 `POST /api/coach/chat`（整段 JSON）在迁移期可保留为降级；目标契约以 `prepare` + SSE `stream` 为准。`GET /api/coach/hint`（popup 模板建议）可保留，不替代 `prepare`。
 
 ### D9：与 Tutor 边界
 
-- **决定**：无 `tutor/` 包、无讲题路由；陪练页仅文案链到未来 Tutor（disabled 或「即将推出」）。Coach system prompt 禁止算法步骤与可 AC 代码。
-- **理由**：用户要求两系统分离。
+- **决定**：无 `tutor/` 包、无讲题路由；Coach prompt 禁止完整解法与可 AC 代码。
 
 ### D10：多 track 题目选 node（B+C）
 
-- **决定**：一题属多 track 时，陪练 context 只选**一个** node 展开：
-  1. **主规则（B）**：在各候选 node 中选取用户 AC 率最低（`accepted_in_node / total_in_node`）者；
-  2. **平局（C）**：若 AC 率相同，选取该 track 下用户**最近 `submitted_at` 最新**的 node。
-- **理由**：对齐薄弱点判断，且 tie-break 贴近当前学习状态。
+- **决定**：候选 node 中 AC 率最低者优先；平局取该 track 下最近 `submitted_at` 最新者。
 
 ### D11：依赖与配置
 
-- **决定**：LangGraph 栈放入 `pyproject.toml` 的 **`[coach]` optional extra**（`pip install leetcode-tracker[coach]`）；核心 `serve`/采集零 LLM 依赖。
-- **决定**：`config.json` 使用**嵌套** `llm` 对象（`provider`、`coach_model`、`api_provider`、`api_key`）；`config set llm.provider` 支持点路径读写，`api_key` 展示脱敏。
+- **决定**：LangGraph 栈在 `[coach]` optional extra；嵌套 `llm` 对象；`config set llm.*` 点路径；`api_key` 脱敏。
 
 ### D12：端口与 health
 
-- **决定**：`GET /health` 扩展返回 `port`、`kg_imported`（kg 表是否有数据）、`coach_available`（是否安装 `[coach]` 依赖）；扩展启动时拉取并缓存 `port`（替代硬编码 8763）。改端口场景以 health + README 说明为准。
+- **决定**：`GET /health` 返回 `port`、`kg_imported`、`coach_available`；扩展启动时缓存 port。
 
 ### D13：版本
 
 - **决定**：包版本 `0.3.0`。
 
+### D14：SSE 实现落点
+
+- **决定**：SSE 挂在 bridge 同进程；标准库 HTTP 若不便承载长流，可引入轻量 ASGI/子应用仅服务 `/api/coach/stream`，**不得**改写 `/submit` 路径。
+- **备选**：短期用 chunked POST 模拟流式，但契约名与客户端仍按 stream 设计，便于替换。
+
+### D15：会话存储
+
+- **决定**：`coach_sessions` + LangGraph checkpoint 同库；同 submission 仅一个规范 prepare 会话；MVP 不自动清理会话。
+
+### D16：同线程并发与断连
+
+- **同 thread 并发**：每个 `thread_id` 同时最多一个进行中的 stream；第二个请求在任何模型调用或 checkpoint 变更前以明确的冲突响应拒绝，不排队、不交错 token。
+- **断连取消**：SSE 客户端断开时，服务必须向下游传播取消，停止 LangGraph/模型生成并释放线程占用；不得继续后台生成。仅完整提交的图步骤可写 checkpoint，取消不得写入伪造的完整 AI 回复。
+
 ## Risks / Trade-offs
 
-- [algorithm-stone 仅覆盖 ~902 题] → 图谱外题目降级为 `problem_stats` + `problems.tags`；context 标明「图谱外」。
-- [8GB 上 Ollama + Chrome + serve 争内存] → 文档建议关闭多余模型；engage 开场可用模板句 + 可选 LLM；单会话串行。
-- [标准库 HTTP 无 SSE] → 陪练页用 POST 轮询 `/api/coach/chat`；v0.3.1 可换 Starlette 子应用。
-- [Ollama 未安装] → engage 返回模板开场 + 页内提示安装；CLI `coach` 明确报错。
-- [上游 map 更新] → importer 记录 `kg_meta.source_version`；README 说明如何刷新 bundled maps。
+- [首条 stream 调 LLM 较慢] → prepare 始终立即返回模板；页面先展示模板并对用户消息逐 token 渲染。
+- [每题都 prepare] → 仅做 SQL 与模板渲染，不启动模型；同 submission 幂等避免重复会话。
+- [algorithm-stone 仅 ~902 题] → 图谱外降级 `problem_stats` + 标明「图谱外」。
+- [8GB 争用] → README 建议单模型；同 thread 严格拒绝并发，跨 thread 资源控制可后续增加。
+- [SSE + ThreadingHTTPServer] → D14 允许局部升级传输层，采集路径不动。
+- [扩展再调 prepare 引发回归] → 必须：热路径零 LLM；prepare 在成功态之后；`selftest_capture.mjs` 必跑；失败静默。
 
 ## Migration Plan
 
-1. 升级后首次 `serve` 或 `kg import` 执行 kg schema migration（`CREATE TABLE IF NOT EXISTS`）。
-2. 用户运行 `leetcode-tracker kg import`（或首次 `coach` 自动提示导入）。
-3. 安装 Ollama 与模型（README 文档化）；无 Ollama 时采集与统计不受影响。
-4. 扩展需重新加载以启用 engage 通知。
-5. 回滚：不删用户数据；停用 coach 路由与扩展 engage 即可；kg 表可保留。
+1. kg schema 与 `coach_sessions` 已随 serve/import 创建。
+2. 用户 `kg import` + 安装 Ollama / `[coach]` extra。
+3. 将 `prepare` 收敛为无 LLM 的原子模板会话；将路由、token stream、checkpoint、结束语和模型失败 fallback 全部移入 LangGraph。
+4. 扩展：`/submit` 成功后再单独 `prepare`；通知/popup 深链同时携带 `submission` 与 `problem_id`。
+5. stream 增加同 thread 并发拒绝与 SSE 断连取消；Ollama 强制 loopback、绕过代理并设置 timeout。
+6. 废弃把 LLM opening 归于 prepare 的文案；旧 API 可暂留但不得绕过新边界。
+7. 回滚：停用 prepare/stream 即可；采集与 kg 表不受损。
 
-## Resolved Decisions（原 Open Questions，实施基准）
-
-以下为用户确认、作为 v0.3.0 开发基准的决议：
+## Resolved Decisions（实施基准）
 
 | 议题 | 决议 |
 |------|------|
-| 多 track 选题 | **B+C**：最弱 node 优先，平局取最近活跃 track |
-| 提交瞬间 engage | **否**：扩展只入库 + 通知；打开陪练页再 engage |
-| 依赖安装 | **`[coach]` extra**，核心包不强制 LangGraph |
-| config 结构 | **嵌套 `llm` 对象** |
-| 通知打开陪练 | **`onClicked` + `tabs` 权限**（深链，不预跑 LLM） |
-| engage 开场 | **模板生成**；用户 chat 后才调 LLM |
-| 会话存储 | **统一 `leetcode.db`**，无独立 coach db 文件 |
-| 端口同步 | **`/health` 返回 port** + 扩展缓存 + 文档 |
-| bundled maps | **是**：随 pip 包发行，附 algorithm-stone MIT attribution |
-| 会话保留 | MVP **不自动清理**；后续可加 30 天 TTL |
-| 采集/陪练边界 | **硬拆开**：`/submit` 不写 coach；陪练只读库；可异步/队列 |
+| 多 track 选题 | **B+C**：最弱 node，平局最近活跃 |
+| 接口形态 | **三接口解耦**：submit → prepare → SSE stream，禁止合并 |
+| 调用顺序 | **必须先入库成功再 prepare**（无数据可读） |
+| 谁调 prepare | 扩展在 `/submit` 成功后另一次调用；页/CLI 可补调 |
+| prepare opening | **确定性模板，不调用 LLM**；同 submission 原子幂等 |
+| 首次模型调用 | 用户发送第一条 **SSE stream** 消息时 |
+| LangGraph 职责 | 路由、token stream、checkpoint、结束语、模型失败确定性 fallback |
+| 续聊传输 | **SSE**；同 thread 并发拒绝，断连取消生成 |
+| 采集热路径 | **仅 `/submit`**；无 Port 双队列；无 content 直连 |
+| prepare 失败 | **不影响**采集成功 badge/通知 |
+| prepare 回退 | 显式 `problem_id` → 该题最新已入库 submission |
+| Ollama | 仅 loopback、不走代理、有 timeout |
+| 深链 | 同时带 `submission` 与 `problem_id` |
+| 依赖安装 | `[coach]` extra |
+| config | 嵌套 `llm` |
+| 会话存储 | 统一 `leetcode.db` |
+| 端口 | `/health.port` + 扩展缓存 |
+| bundled maps | 是，附 MIT attribution |
+| Tutor | 不做 |

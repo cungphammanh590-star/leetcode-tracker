@@ -2,17 +2,41 @@
 
 ### Requirement: 默认本地 Ollama 提供方
 
-系统 SHALL 支持通过 Ollama 在本机运行陪练 LLM；默认配置 MUST 指向本机 Ollama 端点与适合 8GB 内存的量化模型名，且陪练在默认配置下 MUST NOT 向云端发送用户刷题数据。
+系统 SHALL 支持通过 Ollama 在本机运行陪练 LLM；默认配置 MUST 指向 loopback Ollama 端点与适合 8GB 内存的量化模型名，且陪练在默认配置下 MUST NOT 向云端发送用户刷题数据。Ollama 客户端 MUST 绕过 HTTP(S) 代理并配置有限请求 timeout。
 
 #### Scenario: 默认本地推理
 
 - **WHEN** 用户未配置云端 API 且本机 Ollama 可用
-- **THEN** Coach 请求 MUST 仅与本机 Ollama 通信
+- **THEN** Coach 请求 MUST 仅与 loopback Ollama 通信，且 MUST NOT 使用环境或系统代理
+
+#### Scenario: 拒绝非回环 Ollama
+
+- **WHEN** Ollama base URL 的主机不是 `127.0.0.1`、`::1`、`localhost` 或等价 loopback
+- **THEN** 系统 MUST 在发出请求前拒绝该配置
+
+#### Scenario: Ollama 请求超时
+
+- **WHEN** Ollama 在配置的有限 timeout 内未响应或流停滞
+- **THEN** 调用 MUST 被取消并由 LangGraph 进入确定性 fallback，且 MUST NOT 无限占用 stream 或 thread
 
 #### Scenario: Ollama 不可用
 
 - **WHEN** 用户启动陪练但 Ollama 未运行或未拉取模型
 - **THEN** 系统 MUST 返回可读错误，并 MUST 提示如何安装/启动 Ollama 与推荐模型
+
+### Requirement: Prepare 不接触模型提供方
+
+模型提供方 SHALL 仅在用户向已有会话发送 stream 消息后由 LangGraph 使用。`POST /api/coach/prepare` MUST NOT 构建模型客户端、探测 Ollama、拉取模型或发出推理请求。
+
+#### Scenario: Prepare 立即返回
+
+- **WHEN** 客户端为有效已入库提交调用 `prepare`
+- **THEN** 系统 MUST 仅创建或复用模板会话并立即返回；即使 Ollama 未运行也 MUST 不因模型连接而阻塞
+
+#### Scenario: 首条用户消息
+
+- **WHEN** 用户向 prepared session 发送第一条 stream 消息
+- **THEN** LangGraph MAY 构建并调用配置的模型提供方；此前 MUST 没有模型调用
 
 ### Requirement: 可选云端 API 配置占位
 
