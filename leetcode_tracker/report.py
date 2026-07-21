@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 from leetcode_tracker.config import load_config
 from leetcode_tracker.db import init_db
 from leetcode_tracker.paths import ensure_dir
 from leetcode_tracker.stats import OverviewStats, format_status_counts, get_overview
+from leetcode_tracker.timeutil import china_today
 
 
 def _status_mark(status: str) -> str:
@@ -99,7 +99,7 @@ def _report_dir(output_dir: Path | None = None) -> Path:
 
 
 def write_today_report(output_dir: Path | None = None) -> Path:
-    day = datetime.now().astimezone().date().isoformat()
+    day = china_today().isoformat()
     target_dir = _report_dir(output_dir)
     ensure_dir(target_dir)
     path = target_dir / f"{day}.md"
@@ -120,7 +120,7 @@ def clean_reports(*, today_only: bool = False, output_dir: Path | None = None) -
         return []
 
     if today_only:
-        day = datetime.now().astimezone().date().isoformat()
+        day = china_today().isoformat()
         candidates = [target_dir / f"{day}.md"]
     else:
         candidates = sorted(target_dir.glob("*.md"))

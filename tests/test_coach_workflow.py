@@ -27,6 +27,7 @@ def _seed_db(path: Path) -> None:
                 "title": "最大子数组和",
                 "slug": "maximum-subarray",
                 "difficulty": "Medium",
+                "tags": ["Array", "Divide and Conquer", "Dynamic Programming"],
                 "status": "Wrong Answer",
                 "language": "java",
                 "code": "class Solution {\n  public int maxSubArray(int[] nums) {\n    return nums[0];\n  }\n}\n",
@@ -40,6 +41,7 @@ def _seed_db(path: Path) -> None:
                 "title": "最大子数组和",
                 "slug": "maximum-subarray",
                 "difficulty": "Medium",
+                "tags": ["Array", "Divide and Conquer", "Dynamic Programming"],
                 "status": "Accepted",
                 "language": "java",
                 "code": "class Solution {\n  public int maxSubArray(int[] nums) {\n    int best = nums[0];\n    return best;\n  }\n}\n",
@@ -94,6 +96,23 @@ def test_accepted_context_uses_refactor_hint(coach_db: Path) -> None:
     assert "⚠️ 逻辑错误" not in ctx["markdown"]
     assert "运行用时：" in ctx["markdown"]
     assert "内存消耗：" in ctx["markdown"]
+    assert "题目标签：Array、Divide and Conquer、Dynamic Programming" in ctx["markdown"]
+
+
+def test_wrong_answer_hint_covers_index_value_convention(coach_db: Path) -> None:
+    from leetcode_tracker.coach.context import build_coach_context
+
+    conn = connect(coach_db)
+    try:
+        ctx = build_coach_context(conn, "sub-53")
+    finally:
+        conn.close()
+
+    assert "**Wrong Answer**" in ctx["markdown"]
+    assert "nums[i] 与 i/i+1" in ctx["markdown"]
+    assert "返回的是下标、值，还是 n+1" in ctx["markdown"]
+    assert "循环边界" not in ctx["markdown"]
+    assert "题目标签：Array、Divide and Conquer、Dynamic Programming" in ctx["markdown"]
 
 
 def test_prepare_stores_submission_status_and_ac_opening(coach_db: Path) -> None:
@@ -138,6 +157,10 @@ def test_system_prompt_routes_by_status() -> None:
     assert "重构顾问" in COACH_PROMPT_AC
     assert "Bug 排查" in COACH_PROMPT_DEBUG
     assert "```" in COACH_PROMPT_AC  # 禁令里提到代码块语法
+    assert "最多 3 句" in COACH_PROMPT_DEBUG
+    assert "禁止重复同一疑点" in COACH_PROMPT_DEBUG
+    assert "nums[i] 与 i+1" in COACH_PROMPT_DEBUG
+    assert "循环上界是 len(nums)" not in COACH_PROMPT_DEBUG
 
 
 def test_code_block_guardrail_strips_and_appends() -> None:

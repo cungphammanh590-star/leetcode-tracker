@@ -8,11 +8,13 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
+from leetcode_tracker.timeutil import calendar_day, china_now_sql, china_today
+
 ACCEPTED = "Accepted"
 
 
 def _local_day(dt_str: str) -> str:
-    return str(dt_str)[:10]
+    return calendar_day(dt_str)
 
 
 def _parse_ts(dt_str: str) -> Optional[datetime]:
@@ -192,7 +194,7 @@ def _write_lifetime_row(conn: sqlite3.Connection, state: _LifetimeAcc) -> None:
             acceptance_rate, struggle_score, solve_time_seconds,
             avg_attempts_to_ac, attempts_at_last_ac,
             last_status, last_submitted_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(problem_id) DO UPDATE SET
             title = excluded.title,
             title_slug = excluded.title_slug,
@@ -212,7 +214,7 @@ def _write_lifetime_row(conn: sqlite3.Connection, state: _LifetimeAcc) -> None:
             attempts_at_last_ac = excluded.attempts_at_last_ac,
             last_status = excluded.last_status,
             last_submitted_at = excluded.last_submitted_at,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = excluded.updated_at
         """,
         (
             state.problem_id,
@@ -234,6 +236,7 @@ def _write_lifetime_row(conn: sqlite3.Connection, state: _LifetimeAcc) -> None:
             state.attempts_at_last_ac,
             state.last_status,
             state.last_submitted_at,
+            china_now_sql(),
         ),
     )
 
@@ -377,15 +380,15 @@ def sync_problem_meta(
         """
         INSERT INTO problem_stats (
             problem_id, title, title_slug, difficulty, topic_tags, updated_at
-        ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(problem_id) DO UPDATE SET
             title = excluded.title,
             title_slug = excluded.title_slug,
             difficulty = COALESCE(excluded.difficulty, problem_stats.difficulty),
             topic_tags = COALESCE(excluded.topic_tags, problem_stats.topic_tags),
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = excluded.updated_at
         """,
-        (problem_id, title, slug, difficulty, _tags_json(tags)),
+        (problem_id, title, slug, difficulty, _tags_json(tags), china_now_sql()),
     )
 
 
@@ -538,7 +541,7 @@ def ensure_stats_materialized(conn: sqlite3.Connection) -> None:
 def get_today_wrong_summary(
     conn: sqlite3.Connection, today: Optional[date] = None
 ) -> list[dict[str, Any]]:
-    today = today or datetime.now().astimezone().date()
+    today = today or china_today()
     day = today.isoformat()
     rows = conn.execute(
         """

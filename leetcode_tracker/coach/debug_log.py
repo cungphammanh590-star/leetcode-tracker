@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from leetcode_tracker.paths import data_dir, ensure_dir
+from leetcode_tracker.timeutil import china_now
 
 
 def coach_log_dir() -> Path:
@@ -59,13 +59,13 @@ def log_llm_turn(
     try:
         root = coach_log_dir() / "coach"
         ensure_dir(root)
-        now = datetime.now(timezone.utc)
+        now = china_now()
         stamp = now.strftime("%Y%m%d-%H%M%S-%f")[:-3]
         sid = _safe_name(session_id)
         path = root / f"{stamp}_{sid}.md"
 
         meta_lines = [
-            f"- utc: {now.isoformat()}",
+            f"- time: {now.isoformat()}",
             f"- session_id: {session_id}",
             f"- thread_id: {thread_id or session_id}",
             f"- message_count: {len(messages)}",

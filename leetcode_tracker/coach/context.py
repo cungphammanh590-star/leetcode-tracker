@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any, Optional
 
@@ -19,7 +20,9 @@ _STATUS_HINTS = {
         "用户若问更好写法，先问清是更快、更短还是更易读。"
     ),
     "Wrong Answer": (
-        "⚠️ 逻辑错误：重点关注循环边界、变量更新顺序、哈希表覆盖、返回值是否正确。"
+        "⚠️ 逻辑错误：重点关注变量更新顺序、哈希表覆盖、返回值语义；"
+        "若用下标表达取值约定（值放在哪一格、扫描从 0 还是 1），"
+        "核对 nums[i] 与 i/i+1 是否一致，以及最终返回的是下标、值，还是 n+1。"
     ),
     "Runtime Error": (
         "⚠️ 运行时错误：重点关注数组越界（i+1）、空指针（None/null）、递归栈溢出。"
@@ -31,6 +34,25 @@ _STATUS_HINTS = {
         "⚠️ 编译错误：重点关注语法、类型、未定义变量、括号/缩进是否匹配。"
     ),
 }
+
+
+def _format_tags(tags: Any) -> str:
+    if tags is None or tags == "":
+        return "（无）"
+    if isinstance(tags, (list, tuple)):
+        items = [str(x).strip() for x in tags if str(x).strip()]
+        return "、".join(items) if items else "（无）"
+    raw = str(tags).strip()
+    if not raw:
+        return "（无）"
+    try:
+        value = json.loads(raw)
+        if isinstance(value, list):
+            items = [str(x).strip() for x in value if str(x).strip()]
+            return "、".join(items) if items else "（无）"
+    except json.JSONDecodeError:
+        pass
+    return raw
 
 
 def _format_runtime(runtime_ms: Any) -> str:
@@ -134,6 +156,7 @@ def build_coach_context(
     difficulty = sub.get("difficulty") or "—"
     language = sub.get("language") or "text"
     status = str(sub["status"])
+    tags_text = _format_tags(sub.get("tags"))
     code_snippet = _code_snippet(sub.get("code"))
     status_flow = _status_flow(conn, resolved_problem_id)
     status_hint = _STATUS_HINTS.get(status, "")
@@ -143,6 +166,7 @@ def build_coach_context(
     fence_lang = str(language).lower()
     submission_md = f"""## 本次提交现场
 - 题目：{resolved_problem_id}. {title}（{difficulty}）
+- 题目标签：{tags_text}
 - 当前状态：**{status}**
 - 语言：{sub.get('language') or '—'}
 - 运行用时：{runtime}（击败百分比以力扣页面为准，此处不编造）

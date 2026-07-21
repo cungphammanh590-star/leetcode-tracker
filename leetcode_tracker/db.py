@@ -137,4 +137,8 @@ def init_db(conn: sqlite3.Connection | None = None) -> sqlite3.Connection:
     assert conn is not None
     conn.executescript(SCHEMA)
     conn.commit()
+    # 业务时间统一中国时区；旧 UTC 数据一次性迁移
+    from leetcode_tracker.migrate_tz import ensure_china_timestamps
+
+    ensure_china_timestamps(conn)
     return conn

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
 from typing import Any, Optional
+
+from leetcode_tracker.timeutil import china_now_iso
 
 
 def ensure_coach_session_schema(conn: sqlite3.Connection) -> None:
@@ -49,7 +50,7 @@ def create_session(
 ) -> dict[str, Any]:
     ensure_coach_session_schema(conn)
     session_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+    now = china_now_iso()
     conn.execute(
         """
         INSERT INTO coach_sessions (
@@ -107,7 +108,7 @@ def get_or_create_session(
         ).fetchone()
         if row:
             # 复用时刷新 context / status / opening，避免升级后仍吃旧缓存
-            now = datetime.now(timezone.utc).isoformat()
+            now = china_now_iso()
             conn.execute(
                 """
                 UPDATE coach_sessions
@@ -132,7 +133,7 @@ def get_or_create_session(
             return reused, False
 
         session_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = china_now_iso()
         conn.execute(
             """
             INSERT INTO coach_sessions (
@@ -212,7 +213,7 @@ def get_latest_session_for_problem(
 
 
 def touch_session(conn: sqlite3.Connection, session_id: str) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+    now = china_now_iso()
     conn.execute(
         "UPDATE coach_sessions SET updated_at = ? WHERE session_id = ?",
         (now, session_id),

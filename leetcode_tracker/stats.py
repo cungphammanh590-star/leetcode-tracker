@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from leetcode_tracker.problem_stats import ensure_stats_materialized, get_today_wrong_summary
+from leetcode_tracker.timeutil import china_today
 
 
 @dataclass
@@ -34,14 +35,10 @@ def _rate(accepted: int, total: int) -> float:
     return round(100.0 * accepted / total, 1)
 
 
-def _local_today() -> date:
-    return datetime.now().astimezone().date()
-
-
 def compute_streak(conn: sqlite3.Connection, today: Optional[date] = None) -> int:
-    today = today or _local_today()
+    today = today or china_today()
     rows = conn.execute(
-        "SELECT DISTINCT date(submitted_at, 'localtime') AS d FROM submissions ORDER BY d DESC"
+        "SELECT DISTINCT date(submitted_at) AS d FROM submissions ORDER BY d DESC"
     ).fetchall()
     days = {date.fromisoformat(row["d"]) for row in rows if row["d"]}
     if not days:
@@ -74,14 +71,14 @@ def _row_to_item(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def get_today_wrong(conn: sqlite3.Connection, today: Optional[date] = None) -> list[dict[str, Any]]:
-    today = today or _local_today()
+    today = today or china_today()
     rows = conn.execute(
         """
         SELECT s.submission_id, s.problem_id, p.title, p.slug, p.difficulty,
                s.status, s.runtime_ms, s.memory_mb, s.language, s.submitted_at
         FROM submissions s
         JOIN problems p ON p.problem_id = s.problem_id
-        WHERE date(s.submitted_at, 'localtime') = ?
+        WHERE date(s.submitted_at) = ?
           AND s.status != 'Accepted'
         ORDER BY s.submitted_at DESC, s.id DESC
         """,
@@ -130,7 +127,7 @@ def format_status_counts(status_counts: dict[str, int]) -> str:
 
 
 def get_last7_days(conn: sqlite3.Connection, today: Optional[date] = None) -> list[dict[str, Any]]:
-    today = today or _local_today()
+    today = today or china_today()
     result: list[dict[str, Any]] = []
     for i in range(6, -1, -1):
         day = today - timedelta(days=i)
@@ -139,7 +136,7 @@ def get_last7_days(conn: sqlite3.Connection, today: Optional[date] = None) -> li
             conn.execute(
                 """
                 SELECT COUNT(*) AS c FROM submissions
-                WHERE date(submitted_at, 'localtime') = ?
+                WHERE date(submitted_at) = ?
                 """,
                 (day_str,),
             ).fetchone()["c"]
@@ -148,7 +145,7 @@ def get_last7_days(conn: sqlite3.Connection, today: Optional[date] = None) -> li
             conn.execute(
                 """
                 SELECT COUNT(*) AS c FROM submissions
-                WHERE date(submitted_at, 'localtime') = ? AND status = 'Accepted'
+                WHERE date(submitted_at) = ? AND status = 'Accepted'
                 """,
                 (day_str,),
             ).fetchone()["c"]
@@ -165,7 +162,7 @@ def get_last7_days(conn: sqlite3.Connection, today: Optional[date] = None) -> li
 
 def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> OverviewStats:
     ensure_stats_materialized(conn)
-    today = _local_today()
+    today = china_today()
     today_str = today.isoformat()
 
     total = int(conn.execute("SELECT COUNT(*) AS c FROM submissions").fetchone()["c"])
@@ -192,7 +189,7 @@ def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> Overvie
         conn.execute(
             """
             SELECT COUNT(*) AS c FROM submissions
-            WHERE date(submitted_at, 'localtime') = ?
+            WHERE date(submitted_at) = ?
             """,
             (today_str,),
         ).fetchone()["c"]
@@ -201,7 +198,7 @@ def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> Overvie
         conn.execute(
             """
             SELECT COUNT(*) AS c FROM submissions
-            WHERE date(submitted_at, 'localtime') = ? AND status = 'Accepted'
+            WHERE date(submitted_at) = ? AND status = 'Accepted'
             """,
             (today_str,),
         ).fetchone()["c"]
@@ -225,7 +222,7 @@ def get_overview(conn: sqlite3.Connection, *, recent_limit: int = 20) -> Overvie
                s.status, s.runtime_ms, s.memory_mb, s.language, s.submitted_at
         FROM submissions s
         JOIN problems p ON p.problem_id = s.problem_id
-        WHERE date(s.submitted_at, 'localtime') = ?
+        WHERE date(s.submitted_at) = ?
         ORDER BY s.submitted_at DESC, s.id DESC
         """,
         (today_str,),

@@ -122,6 +122,8 @@ def upsert_problem(
     difficulty: Any = None,
     tags: Any = None,
 ) -> None:
+    from leetcode_tracker.timeutil import china_now_sql
+
     diff = normalize_difficulty(difficulty)
     if isinstance(tags, (list, tuple)):
         tags_json = json.dumps(list(tags), ensure_ascii=False)
@@ -132,15 +134,15 @@ def upsert_problem(
 
     conn.execute(
         """
-        INSERT INTO problems (problem_id, title, slug, difficulty, tags)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO problems (problem_id, title, slug, difficulty, tags, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(problem_id) DO UPDATE SET
             title = excluded.title,
             slug = excluded.slug,
             difficulty = COALESCE(excluded.difficulty, problems.difficulty),
             tags = COALESCE(excluded.tags, problems.tags)
         """,
-        (problem_id, title, slug, diff, tags_json),
+        (problem_id, title, slug, diff, tags_json, china_now_sql()),
     )
     sync_problem_meta(
         conn,
@@ -213,26 +215,33 @@ def save_submission(conn: sqlite3.Connection, payload: dict[str, Any]) -> SaveRe
         return SaveResult(created=False, submission_id=submission_id)
 
     try:
+        from leetcode_tracker.timeutil import china_now_sql
+
+        submitted_at = china_now_sql()
         conn.execute(
             """
             INSERT INTO submissions (
-                submission_id, problem_id, status, code, runtime_ms, memory_mb, language
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                submission_id, problem_id, status, code, runtime_ms, memory_mb,
+                language, submitted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (submission_id, problem_id, status, code, runtime_ms, memory_mb, language),
+            (
+                submission_id,
+                problem_id,
+                status,
+                code,
+                runtime_ms,
+                memory_mb,
+                language,
+                submitted_at,
+            ),
         )
-        submitted = conn.execute(
-            "SELECT submitted_at FROM submissions WHERE submission_id = ?",
-            (submission_id,),
-        ).fetchone()
-        submitted_at = str(submitted["submitted_at"]) if submitted else None
-        if submitted_at:
-            apply_submission_stats(
-                conn,
-                problem_id=problem_id,
-                status=status,
-                submitted_at=submitted_at,
-            )
+        apply_submission_stats(
+            conn,
+            problem_id=problem_id,
+            status=status,
+            submitted_at=submitted_at,
+        )
         conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()

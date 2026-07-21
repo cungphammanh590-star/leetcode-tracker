@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from leetcode_tracker.kg.parser import bundled_maps_dir, parse_map_file
+from leetcode_tracker.timeutil import china_now_iso
 
 
 def _clear_kg_tables(conn: sqlite3.Connection) -> None:
@@ -91,7 +91,7 @@ def import_maps(
             (len(track_problem_ids), parsed.track_id),
         )
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = china_now_iso()
     conn.execute(
         "INSERT INTO kg_meta (key, value) VALUES (?, ?)",
         ("imported_at", now),
