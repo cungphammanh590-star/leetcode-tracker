@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from leetcode_tracker.paths import db_path, ensure_parent
+from leetcode_tracker.infra.paths import db_path, ensure_parent
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS problems (
@@ -138,7 +138,7 @@ def init_db(conn: sqlite3.Connection | None = None) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     conn.commit()
     # 业务时间统一中国时区；旧 UTC 数据一次性迁移
-    from leetcode_tracker.migrate_tz import ensure_china_timestamps
+    from leetcode_tracker.infra.migrate_tz import ensure_china_timestamps
 
     ensure_china_timestamps(conn)
     return conn

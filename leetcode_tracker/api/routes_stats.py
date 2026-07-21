@@ -7,8 +7,8 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from leetcode_tracker.db import init_db
-from leetcode_tracker.problem_stats import (
+from leetcode_tracker.infra.db import init_db
+from leetcode_tracker.core.problem_stats import (
     ensure_stats_materialized,
     get_daily_stats_rows,
     get_llm_context,
@@ -16,7 +16,7 @@ from leetcode_tracker.problem_stats import (
     get_problem_submissions,
     list_problem_stats,
 )
-from leetcode_tracker.stats import get_overview, overview_to_dict
+from leetcode_tracker.core.stats import get_overview, overview_to_dict
 
 router = APIRouter()
 

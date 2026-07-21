@@ -6,7 +6,7 @@ import sqlite3
 from datetime import date
 from typing import Any, Optional
 
-from leetcode_tracker.timeutil import china_today
+from leetcode_tracker.infra.timeutil import china_today
 
 
 def get_submission_by_id(

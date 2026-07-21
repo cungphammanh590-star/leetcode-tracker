@@ -7,14 +7,14 @@ from typing import Any, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from leetcode_tracker.autostart import clean_logs
+from leetcode_tracker.infra.autostart import clean_logs
 from leetcode_tracker.coach.debug_log import clean_coach_debug_logs
-from leetcode_tracker.config import load_config, mask_config_for_display
-from leetcode_tracker.db import init_db
+from leetcode_tracker.infra.config import load_config, mask_config_for_display
+from leetcode_tracker.infra.db import init_db
 from leetcode_tracker.kg.import_maps import get_kg_status, import_maps
-from leetcode_tracker.paths import db_path
-from leetcode_tracker.problem_stats import rebuild_stats
-from leetcode_tracker.report import clean_reports, write_today_report
+from leetcode_tracker.infra.paths import db_path
+from leetcode_tracker.core.problem_stats import rebuild_stats
+from leetcode_tracker.core.report import clean_reports, write_today_report
 
 router = APIRouter()
 

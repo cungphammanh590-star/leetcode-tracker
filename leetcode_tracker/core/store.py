@@ -9,7 +9,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from leetcode_tracker.problem_stats import apply_submission_stats, sync_problem_meta
+from leetcode_tracker.core.problem_stats import apply_submission_stats, sync_problem_meta
 
 
 class StoreError(Exception):
@@ -122,7 +122,7 @@ def upsert_problem(
     difficulty: Any = None,
     tags: Any = None,
 ) -> None:
-    from leetcode_tracker.timeutil import china_now_sql
+    from leetcode_tracker.infra.timeutil import china_now_sql
 
     diff = normalize_difficulty(difficulty)
     if isinstance(tags, (list, tuple)):
@@ -215,7 +215,7 @@ def save_submission(conn: sqlite3.Connection, payload: dict[str, Any]) -> SaveRe
         return SaveResult(created=False, submission_id=submission_id)
 
     try:
-        from leetcode_tracker.timeutil import china_now_sql
+        from leetcode_tracker.infra.timeutil import china_now_sql
 
         submitted_at = china_now_sql()
         conn.execute(

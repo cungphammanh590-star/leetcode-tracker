@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
-from leetcode_tracker.timeutil import calendar_day, china_now_sql, china_today
+from leetcode_tracker.infra.timeutil import calendar_day, china_now_sql, china_today
 
 ACCEPTED = "Accepted"
 

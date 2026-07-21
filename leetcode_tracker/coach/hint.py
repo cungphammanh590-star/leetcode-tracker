@@ -11,8 +11,8 @@ from leetcode_tracker.kg.queries import (
     list_placements_for_problem,
     select_primary_placement,
 )
-from leetcode_tracker.problem_stats import get_problem_stats_row
-from leetcode_tracker.submissions import (
+from leetcode_tracker.core.problem_stats import get_problem_stats_row
+from leetcode_tracker.core.submissions import (
     count_today_attempts_for_problem,
     get_latest_submission_for_problem,
 )

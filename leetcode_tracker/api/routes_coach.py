@@ -10,14 +10,14 @@ from typing import Any, AsyncIterator, Optional
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from leetcode_tracker.coach_deps import (
+from leetcode_tracker.coach.deps import (
     coach_dependencies_available,
     coach_import_error_message,
 )
-from leetcode_tracker.db import init_db
+from leetcode_tracker.infra.db import init_db
 from leetcode_tracker.kg.import_maps import kg_is_imported
-from leetcode_tracker.problem_stats import ensure_stats_materialized
-from leetcode_tracker.submissions import get_problem_id_by_slug
+from leetcode_tracker.core.problem_stats import ensure_stats_materialized
+from leetcode_tracker.core.submissions import get_problem_id_by_slug
 
 router = APIRouter()
 

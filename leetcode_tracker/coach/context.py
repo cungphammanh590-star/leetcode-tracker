@@ -7,7 +7,7 @@ import sqlite3
 from typing import Any, Optional
 
 from leetcode_tracker.kg.queries import format_kg_context_markdown
-from leetcode_tracker.submissions import (
+from leetcode_tracker.core.submissions import (
     count_today_attempts_for_problem,
     get_latest_submission_for_problem,
     get_submission_by_id,

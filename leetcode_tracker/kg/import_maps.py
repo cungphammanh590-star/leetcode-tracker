@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from leetcode_tracker.kg.parser import bundled_maps_dir, parse_map_file
-from leetcode_tracker.timeutil import china_now_iso
+from leetcode_tracker.infra.timeutil import china_now_iso
 
 
 def _clear_kg_tables(conn: sqlite3.Connection) -> None:

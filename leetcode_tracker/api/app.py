@@ -13,7 +13,7 @@ from leetcode_tracker.api.routes_core import router as core_router
 from leetcode_tracker.api.routes_ops import router as ops_router
 from leetcode_tracker.api.routes_pages import router as pages_router
 from leetcode_tracker.api.routes_stats import router as stats_router
-from leetcode_tracker.db import init_db
+from leetcode_tracker.infra.db import init_db
 
 
 class MirrorOriginCORS(BaseHTTPMiddleware):

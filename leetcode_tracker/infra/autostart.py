@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from leetcode_tracker.config import load_config, save_config
+from leetcode_tracker.infra.config import load_config, save_config
 
 LABEL = "com.leetcode-tracker.serve"
 

@@ -17,7 +17,7 @@ from leetcode_tracker.coach.opening import template_opening
 from leetcode_tracker.coach.prompts import system_prompt_for_status
 from leetcode_tracker.coach.sessions import get_or_create_session, get_session, touch_session
 from leetcode_tracker.llm.provider import build_chat_model
-from leetcode_tracker.paths import db_path
+from leetcode_tracker.infra.paths import db_path
 
 _END_PHRASES = ("结束", "够了", "先这样", "不用了", "谢谢")
 _SESSION_LOCKS: dict[str, threading.Lock] = {}

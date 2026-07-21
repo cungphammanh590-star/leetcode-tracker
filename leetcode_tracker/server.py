@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from leetcode_tracker.config import load_config
-from leetcode_tracker.db import init_db
+from leetcode_tracker.infra.config import load_config
+from leetcode_tracker.infra.db import init_db
 
 _UVICORN_APP = "leetcode_tracker.api.app:create_app"
 

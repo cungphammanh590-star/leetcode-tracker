@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from leetcode_tracker.timeutil import (
+from leetcode_tracker.infra.timeutil import (
     TZ_META_KEY,
     TZ_META_VALUE,
     china_now_iso,
@@ -118,7 +118,7 @@ def ensure_china_timestamps(conn: sqlite3.Connection) -> bool:
     _shift_iso_columns(conn)
 
     # 日切边界可能变化，按新墙钟重建汇总
-    from leetcode_tracker.problem_stats import rebuild_stats
+    from leetcode_tracker.core.problem_stats import rebuild_stats
 
     submissions = int(
         conn.execute("SELECT COUNT(*) AS c FROM submissions").fetchone()["c"]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from leetcode_tracker.config import load_config
+from leetcode_tracker.infra.config import load_config
 
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_TIMEOUT_SECONDS = 45.0

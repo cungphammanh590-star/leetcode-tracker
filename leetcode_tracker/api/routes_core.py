@@ -7,11 +7,11 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from leetcode_tracker.coach_deps import coach_dependencies_available
-from leetcode_tracker.config import load_config
-from leetcode_tracker.db import init_db
+from leetcode_tracker.coach.deps import coach_dependencies_available
+from leetcode_tracker.infra.config import load_config
+from leetcode_tracker.infra.db import init_db
 from leetcode_tracker.kg.import_maps import kg_is_imported
-from leetcode_tracker.store import StoreError, count_submissions, save_submission
+from leetcode_tracker.core.store import StoreError, count_submissions, save_submission
 
 router = APIRouter()
 

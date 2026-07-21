@@ -6,7 +6,7 @@ import sqlite3
 import uuid
 from typing import Any, Optional
 
-from leetcode_tracker.timeutil import china_now_iso
+from leetcode_tracker.infra.timeutil import china_now_iso
 
 
 def ensure_coach_session_schema(conn: sqlite3.Connection) -> None:

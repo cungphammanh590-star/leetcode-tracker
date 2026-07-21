@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from leetcode_tracker.paths import data_dir, ensure_dir
-from leetcode_tracker.timeutil import china_now
+from leetcode_tracker.infra.paths import data_dir, ensure_dir
+from leetcode_tracker.infra.timeutil import china_now
 
 
 def coach_log_dir() -> Path:
