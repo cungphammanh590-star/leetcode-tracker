@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="$(python3 -c "from leetcode_tracker import __version__; print(__version__)" 2>/dev/null || echo "0.3.2")"
+VERSION="$(python3 -c "from leetcode_tracker import __version__; print(__version__)" 2>/dev/null || echo "0.3.3")"
 STAGE="$ROOT/release/stage"
 OUT_DIR="$ROOT/release"
 DIST_NAME="LeetCode-Tracker-macOS-v${VERSION}"
@@ -36,7 +36,7 @@ LeetCode Tracker v${VERSION}（仅支持 leetcode.cn）
 
    可选陪练：
    pip install 'leetcode-tracker[coach]'
-   （另需本机 Ollama + 模型，例如 qwen2.5:7b-instruct-q4_K_M）
+   （本地 Ollama，或维护台填写 DeepSeek API Key）
 
 2. 启动服务
    leetcode-tracker serve

@@ -1,6 +1,6 @@
 # LeetCode Tracker
 
-完全本地的 **leetcode.cn** 刷题追踪助手（**v0.3.2**）。  
+完全本地的 **leetcode.cn** 刷题追踪助手（**v0.3.3**）。  
 在力扣正常提交后，浏览器扩展会把记录写到你的 Mac；可选本地 AI 陪练帮你复盘。**刷题数据不出本机。**
 
 ## 你需要准备什么
@@ -14,13 +14,15 @@
 
 ```bash
 # 核心（追踪 + 仪表盘）
-pip install git+https://github.com/cungphammanh590-star/leetcode-tracker.git@v0.3.2
+pip install git+https://github.com/cungphammanh590-star/leetcode-tracker.git@v0.3.3
 
-# 可选：本地陪练 + 知识图谱
+# 可选：陪练（Ollama + DeepSeek 依赖一并安装）
 pip install 'leetcode-tracker[coach]'
 ```
 
-浏览器扩展请从本版 [Release](https://github.com/cungphammanh590-star/leetcode-tracker/releases/tag/v0.3.2) 下载 zip，解压后使用其中的 `extension/` 文件夹（或克隆本仓库后加载仓库内 `extension/`）。
+若从旧版升级且维护台报缺少 `langchain-openai`，请再执行一次上面的 `[coach]` 安装后重启 `serve`。
+
+浏览器扩展请从本版 [Release](https://github.com/cungphammanh590-star/leetcode-tracker/releases/tag/v0.3.3) 下载 zip，解压后使用其中的 `extension/` 文件夹（或克隆本仓库后加载仓库内 `extension/`）。
 
 ## 日常使用
 
