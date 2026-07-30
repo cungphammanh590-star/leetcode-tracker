@@ -43,7 +43,7 @@ def template_opening(
 
     if placement is None:
         return (
-            f"{head}。这道题不在学习路线图里——"
+            f"{head}。"
             "先说说你卡在哪，或打算怎么验证自己的想法？"
         )
 

@@ -1,7 +1,12 @@
 # LeetCode Tracker
 
-完全本地的 **leetcode.cn** 刷题追踪助手（**v0.3.4**）。  
+完全本地的 **leetcode.cn** 刷题追踪助手（**v0.3.4 · 轻量本地封板**）。  
 在力扣正常提交后，浏览器扩展把记录写到本机；可选 AI 陪练帮你复盘。**刷题数据不出本机。**
+
+> **本分支 `local-stable`**：轻量本地版维护线（对应 Release **v0.3.4**）。  
+> 只修缺陷与安全问题，不引入「智能教练 / Agent」能力。  
+> 安装请钉在本分支或标签：`…@local-stable` / `…@v0.3.4`。  
+> 主线 `main` 将继续演进可选的云端智能教练；需要最新实验能力请跟 `main`。
 
 不限定操作系统：只要本机能跑 **Python 3.9+**，并用 **Chrome / Edge**（或同内核浏览器）加载扩展即可。
 
@@ -49,6 +54,9 @@ python -m pip install ".[coach]"
 
 ```bash
 python -m pip install git+https://github.com/cungphammanh590-star/leetcode-tracker.git@v0.3.4
+
+# 或跟踪轻量维护支（仅接收本地版缺陷修复）
+# python -m pip install git+https://github.com/cungphammanh590-star/leetcode-tracker.git@local-stable
 
 # 可选陪练
 python -m pip install "leetcode-tracker[coach]"
