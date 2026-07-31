@@ -1,10 +1,10 @@
 # LeetCode Tracker
 
-完全本地的 **leetcode.cn** 刷题追踪助手（**v0.3.4**）。  
+完全本地的 **leetcode.cn** 刷题追踪助手（**v1.0.0**）。  
 在力扣正常提交后，浏览器扩展把记录写到本机；可选 AI 陪练帮你复盘。**刷题数据不出本机。**
 
-> **版本线**：轻量本地能力以 Release [`v0.3.4`](https://github.com/cungphammanh590-star/leetcode-tracker/releases/tag/v0.3.4) / 维护支 [`local-stable`](https://github.com/cungphammanh590-star/leetcode-tracker/tree/local-stable) 为准（只修缺陷）。  
-> 本支 `main` 将继续演进可选的云端「智能教练」；只需本地轻量版请安装 `v0.3.4` 或跟踪 `local-stable`。
+> **版本线**：轻量本地能力以 Release [`v0.3.4`](https://github.com/cungphammanh590-star/leetcode-tracker/releases/tag/v0.3.4) / 维护支 [`local-stable`](https://github.com/cungphammanh590-star/leetcode-tracker/tree/local-stable) 为准（只修缺陷，不含智能教练）。  
+> 本支 `main` @ **v1.0** 提供可选的云端「智能教练」（需 DeepSeek API Key）；只需本地轻量版请安装 `v0.3.4` 或跟踪 `local-stable`。
 
 不限定操作系统：只要本机能跑 **Python 3.9+**，并用 **Chrome / Edge**（或同内核浏览器）加载扩展即可。
 
@@ -144,6 +144,7 @@ leetcode-tracker config set port 9000
 - 只追踪：不必装 Ollama，也不必填 API Key
 - 本地模型：先启动 Ollama 并拉取模型，再到陪练页发消息
 - 云端：打开 **http://127.0.0.1:8763/ops** →「陪练模型」选 DeepSeek，填写 Key 后保存
+- **智能教练（v1.0）**：在学习偏好或维护台开启；**必须**已配置云端 API + Key（本地 Ollama 不可开）。开启后题内多轮走 Agent；「今日总结 / 复习 / 推荐」仍走免费规则。轻量用户请用 `v0.3.4` / `local-stable`
 - 模型超时/失败会有兜底回复，**不影响提交采集**
 - 若维护台提示缺少 `langchain-openai` 等，再执行一次 `pip install ".[coach]"`（ZIP 安装）或 `pip install "leetcode-tracker[coach]"` 后重启 `serve`
 

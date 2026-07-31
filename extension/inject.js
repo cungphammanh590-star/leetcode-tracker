@@ -252,11 +252,13 @@
       const fromQuestion = {
         problem_id: null,
         title: null,
-        slug: null,
+        slug: slug || null,
         difficulty: null,
         tags: [],
       };
-      applyQuestionMeta(fromQuestion, questionObj);
+      applyQuestionMeta(fromQuestion, questionObj, {
+        preferUrlSlug: Boolean(slug),
+      });
       meta = mergeProblemMeta(meta, rememberProblemMeta(fromQuestion));
     }
     return meta;
@@ -384,25 +386,42 @@
     return { problem_id: null, title: cleaned };
   }
 
-  function extractQuestionFromDehydratedState(pageProps) {
-    const queries = pageProps?.dehydratedState?.queries;
-    if (!Array.isArray(queries)) return null;
-    for (const query of queries) {
-      const q = query?.state?.data?.question;
-      if (q && (q.titleSlug || q.questionFrontendId || q.title || q.translatedTitle)) {
-        return q;
-      }
-    }
-    return null;
+  function questionSlug(q) {
+    if (!q) return "";
+    return String(q.titleSlug || q.questionTitleSlug || "").trim();
   }
 
-  function applyQuestionMeta(meta, q) {
+  function extractQuestionFromDehydratedState(pageProps, preferredSlug) {
+    const queries = pageProps?.dehydratedState?.queries;
+    if (!Array.isArray(queries)) return null;
+    let fallback = null;
+    for (const query of queries) {
+      const q = query?.state?.data?.question;
+      if (!q || !(q.titleSlug || q.questionFrontendId || q.title || q.translatedTitle)) {
+        continue;
+      }
+      const qSlug = questionSlug(q);
+      if (preferredSlug && qSlug && qSlug === preferredSlug) return q;
+      if (!fallback) fallback = q;
+    }
+    // 有明确 URL slug 时只接受同 slug 的缓存 question
+    if (preferredSlug) return null;
+    return fallback;
+  }
+
+  function applyQuestionMeta(meta, q, { preferUrlSlug = false } = {}) {
     if (!q) return;
+    const urlSlug = preferUrlSlug ? String(meta.slug || "").trim() : "";
+    const qSlug = questionSlug(q);
+    if (urlSlug && qSlug && qSlug !== urlSlug) return;
+
     meta.problem_id = Number(
       q.questionFrontendId || q.frontendQuestionId || q.questionId || meta.problem_id
     );
     meta.title = q.translatedTitle || q.title || meta.title;
-    meta.slug = q.titleSlug || q.questionTitleSlug || meta.slug;
+    if (!urlSlug) {
+      meta.slug = qSlug || meta.slug;
+    }
     meta.difficulty =
       difficultyLabel(q.difficulty) ||
       difficultyLabel(q.difficultyLevel) ||
@@ -427,6 +446,7 @@
     const path = location.pathname || "";
     const m = path.match(/\/problems\/([^/]+)/);
     if (m) meta.slug = decodeURIComponent(m[1]);
+    const urlSlug = meta.slug;
 
     const nextData = document.getElementById("__NEXT_DATA__");
     if (nextData && nextData.textContent) {
@@ -435,17 +455,20 @@
       const q =
         pageProps?.question ||
         pageProps?.data?.question ||
-        extractQuestionFromDehydratedState(pageProps);
-      applyQuestionMeta(meta, q);
+        extractQuestionFromDehydratedState(pageProps, urlSlug);
+      applyQuestionMeta(meta, q, { preferUrlSlug: Boolean(urlSlug) });
     }
 
     try {
       const pd = window.pageData;
       if (pd) {
-        meta.problem_id = Number(pd.questionFrontendId || pd.questionId || meta.problem_id);
-        meta.title = pd.questionTitle || pd.translateTitle || meta.title;
-        meta.slug = pd.questionTitleSlug || meta.slug;
-        meta.difficulty = difficultyLabel(pd.difficulty) || meta.difficulty;
+        const pdSlug = String(pd.questionTitleSlug || "").trim();
+        if (!urlSlug || !pdSlug || pdSlug === urlSlug) {
+          meta.problem_id = Number(pd.questionFrontendId || pd.questionId || meta.problem_id);
+          meta.title = pd.questionTitle || pd.translateTitle || meta.title;
+          if (!urlSlug) meta.slug = pdSlug || meta.slug;
+          meta.difficulty = difficultyLabel(pd.difficulty) || meta.difficulty;
+        }
       }
     } catch {
       // ignore

@@ -30,6 +30,7 @@ from leetcode_tracker.coach.review import list_review_due, pick_review_queue
 from leetcode_tracker.infra.config import (
     get_learning_config,
     mask_config_for_display,
+    smart_coach_gate,
     update_learning_config,
 )
 from leetcode_tracker.infra.db import init_db
@@ -83,12 +84,22 @@ async def api_learning_update(request: Request) -> Any:
         kwargs["kg_mode"] = bool(body["kg_mode"])
     if "active_list_id" in body:
         kwargs["active_list_id"] = str(body["active_list_id"])
+    if "smart_coach" in body:
+        want = bool(body["smart_coach"])
+        if want:
+            gate = smart_coach_gate()
+            if not gate.get("can_enable"):
+                return _err(
+                    str(gate.get("reason") or "当前无法开启智能教练"),
+                    status_code=400,
+                )
+        kwargs["smart_coach"] = want
     if not kwargs:
         return _err("无更新字段")
     cfg = update_learning_config(**kwargs)
     return {
         "status": "ok",
-        "learning": cfg.get("learning"),
+        "learning": get_learning_config(),
         "config": mask_config_for_display(cfg),
     }
 
@@ -256,6 +267,31 @@ def api_review_today(limit: int = 20) -> Any:
             "progress": progress,
             "learning": get_learning_config(),
         }
+    finally:
+        conn.close()
+
+
+@router.get("/api/coach/insights")
+def api_coach_insights(refresh: int = 0) -> Any:
+    """今日教练洞察：本机聚合 + 可选 API 润色；refresh=1 强制重生成。"""
+    from leetcode_tracker.coach.insights import get_smart_insights
+    from leetcode_tracker.infra.config import is_smart_coach_enabled, smart_coach_gate
+
+    learning = get_learning_config()
+    if not is_smart_coach_enabled():
+        gate = smart_coach_gate()
+        return {
+            "status": "ok",
+            "enabled": False,
+            "reason": gate.get("reason") or "智能教练未开启",
+            "learning": learning,
+            "insights": [],
+            "weak_points": [],
+        }
+    conn = init_db()
+    try:
+        payload = get_smart_insights(conn, refresh=bool(refresh))
+        return {"status": "ok", "enabled": True, "learning": learning, **payload}
     finally:
         conn.close()
 

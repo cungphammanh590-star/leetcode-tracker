@@ -56,7 +56,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="LeetCode Tracker Bridge",
-        version="0.3.4",
+        version="1.0.0",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

@@ -38,6 +38,10 @@ def ensure_coach_session_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE coach_sessions ADD COLUMN abandoned_at TEXT"
         )
+    if "coach_kind" not in columns:
+        conn.execute(
+            "ALTER TABLE coach_sessions ADD COLUMN coach_kind TEXT NOT NULL DEFAULT 'classic'"
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_coach_sessions_submission ON coach_sessions(submission_id)"
     )
@@ -52,16 +56,19 @@ def create_session(
     opening: str,
     context_markdown: str,
     submission_status: str = "",
+    coach_kind: str = "classic",
 ) -> dict[str, Any]:
     ensure_coach_session_schema(conn)
+    kind = str(coach_kind or "classic").strip() or "classic"
     session_id = str(uuid.uuid4())
     now = china_now_iso()
     conn.execute(
         """
         INSERT INTO coach_sessions (
             session_id, submission_id, problem_id, opening,
-            context_markdown, submission_status, thread_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            context_markdown, submission_status, thread_id, created_at, updated_at,
+            coach_kind
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             session_id,
@@ -73,6 +80,7 @@ def create_session(
             session_id,
             now,
             now,
+            kind,
         ),
     )
     conn.commit()
@@ -86,6 +94,7 @@ def create_session(
         "thread_id": session_id,
         "created_at": now,
         "updated_at": now,
+        "coach_kind": kind,
     }
 
 
@@ -97,20 +106,23 @@ def get_or_create_session(
     opening: str,
     context_markdown: str,
     submission_status: str = "",
+    coach_kind: str = "classic",
 ) -> tuple[dict[str, Any], bool]:
     """原子获取或创建提交级会话；返回 (session, created)。"""
     ensure_coach_session_schema(conn)
+    kind = str(coach_kind or "classic").strip() or "classic"
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             """
             SELECT * FROM coach_sessions
             WHERE submission_id = ?
+              AND COALESCE(coach_kind, 'classic') = ?
               AND (abandoned_at IS NULL OR abandoned_at = '')
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            (submission_id,),
+            (submission_id, kind),
         ).fetchone()
         if row:
             # 复用时刷新 context / status / opening，避免升级后仍吃旧缓存
@@ -119,7 +131,7 @@ def get_or_create_session(
                 """
                 UPDATE coach_sessions
                 SET context_markdown = ?, submission_status = ?,
-                    opening = ?, updated_at = ?
+                    opening = ?, updated_at = ?, coach_kind = ?
                 WHERE session_id = ?
                 """,
                 (
@@ -127,6 +139,7 @@ def get_or_create_session(
                     submission_status,
                     opening,
                     now,
+                    kind,
                     row["session_id"],
                 ),
             )
@@ -136,6 +149,7 @@ def get_or_create_session(
             reused["submission_status"] = submission_status
             reused["opening"] = opening
             reused["updated_at"] = now
+            reused["coach_kind"] = kind
             return reused, False
 
         session_id = str(uuid.uuid4())
@@ -145,8 +159,8 @@ def get_or_create_session(
             INSERT INTO coach_sessions (
                 session_id, submission_id, problem_id, opening,
                 context_markdown, submission_status, thread_id,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, coach_kind
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -158,6 +172,7 @@ def get_or_create_session(
                 session_id,
                 now,
                 now,
+                kind,
             ),
         )
         conn.commit()
@@ -171,6 +186,7 @@ def get_or_create_session(
             "thread_id": session_id,
             "created_at": now,
             "updated_at": now,
+            "coach_kind": kind,
         }, True
     except Exception:
         conn.rollback()

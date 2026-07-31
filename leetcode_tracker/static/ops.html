@@ -445,6 +445,13 @@
           </span>
           <input type="checkbox" id="learn-kg-mode" />
         </label>
+        <label class="toggle-card">
+          <span>
+            <strong>智能教练</strong>
+            <small id="learn-smart-hint">需云端 API + Key</small>
+          </span>
+          <input type="checkbox" id="learn-smart-coach" />
+        </label>
       </div>
 
       <div class="field-block">
@@ -1014,6 +1021,14 @@
         const L = data.learning || {};
         document.getElementById("learn-list-mode").checked = !!L.list_mode;
         document.getElementById("learn-kg-mode").checked = !!L.kg_mode;
+        const smartEl = document.getElementById("learn-smart-coach");
+        const smartHint = document.getElementById("learn-smart-hint");
+        const canSmart = !!L.can_enable_smart_coach;
+        smartEl.checked = !!L.smart_coach && canSmart;
+        smartEl.disabled = !canSmart;
+        smartHint.textContent = canSmart
+          ? "开启后题内对话走 Agent"
+          : (L.smart_coach_reason || "需云端 API + Key");
         const sel = document.getElementById("learn-active-list");
         sel.innerHTML = "";
         cachedLists.forEach((item) => {
@@ -1064,6 +1079,7 @@
           list_mode: document.getElementById("learn-list-mode").checked,
           kg_mode: document.getElementById("learn-kg-mode").checked,
           active_list_id: document.getElementById("learn-active-list").value,
+          smart_coach: document.getElementById("learn-smart-coach").checked,
         });
         if (data.status !== "ok") throw new Error(data.message || "failed");
         setMsg("learn-msg", "学习偏好已保存", "ok");

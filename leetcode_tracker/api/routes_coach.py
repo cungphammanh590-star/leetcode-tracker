@@ -145,7 +145,7 @@ async def _prepare_body(request: Request) -> Any:
             status_code=400,
             content={"status": "error", "message": "problem_id must be an integer"},
         )
-    if mode in {"daily_review", "recommend", "review"}:
+    if mode in {"daily_review", "recommend", "review", "smart"}:
         pass
     elif not submission_id and problem_id is None:
         return JSONResponse(
@@ -162,7 +162,7 @@ async def _prepare_body(request: Request) -> Any:
         conn = init_db()
         try:
             ensure_stats_materialized(conn)
-            if mode not in {"daily_review", "recommend", "review"}:
+            if mode not in {"daily_review", "recommend", "review", "smart"}:
                 from leetcode_tracker.kg.import_maps import ensure_kg_imported
 
                 try:

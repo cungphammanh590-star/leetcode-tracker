@@ -164,8 +164,9 @@
     let sessionId = params.get("session");
     let busy = false;
     let preparePromise = null;
-    let graphMode = "local"; // local | api
+    let graphMode = "local"; // local | api | smart
     let exitOffered = false;
+    let smartCoachOn = false;
 
     function addMsg(text, role) {
       const div = document.createElement("div");
@@ -188,15 +189,19 @@
 
     function syncActionButtons() {
       const ready = Boolean(sessionId) && !busy;
-      const isApi = graphMode === "api";
+      const isApi = graphMode === "api" || graphMode === "smart";
+      const isSmart = smartCoachOn || graphMode === "smart";
       btnEnd.disabled = !ready;
       btnEnd.textContent = isApi ? "结束并诊断" : "结束本轮";
       btnEnd.title = isApi
         ? "输出诊断并结束本会话"
         : "收束本轮并结束会话";
-      btnReviewSummary.disabled = !ready;
-      btnReviewQueue.disabled = !ready;
-      btnRecommend.disabled = !ready;
+      btnReviewSummary.style.display = isSmart ? "none" : "";
+      btnReviewQueue.style.display = isSmart ? "none" : "";
+      btnRecommend.style.display = isSmart ? "none" : "";
+      btnReviewSummary.disabled = isSmart || !ready;
+      btnReviewQueue.disabled = isSmart || !ready;
+      btnRecommend.disabled = isSmart || !ready;
       btnSkeleton.style.display = isApi ? "none" : "";
       btnDeep.style.display = isApi ? "" : "none";
       btnSkeleton.disabled = isApi || !ready;
@@ -458,7 +463,10 @@
       if (e.key === "Enter") sendMessage();
     });
     btnEnd.addEventListener("click", () =>
-      sendPayload({ action: graphMode === "api" ? "diagnose" : "close" })
+      sendPayload({
+        action:
+          graphMode === "api" || graphMode === "smart" ? "diagnose" : "close",
+      })
     );
     btnReviewSummary.addEventListener("click", () =>
       sendPayload({ action: "daily_review" })
@@ -480,10 +488,20 @@
           return;
         }
         graphMode = health.llm_provider === "api" ? "api" : "local";
+        try {
+          const learn = await fetch("/api/learning").then((r) => r.json());
+          const L = (learn && learn.learning) || {};
+          smartCoachOn = !!L.smart_coach_enabled;
+          if (smartCoachOn) graphMode = "smart";
+          syncActionButtons();
+        } catch (_e) {
+          /* ignore */
+        }
         const profileMode =
           modeParam === "daily_review" ||
           modeParam === "recommend" ||
-          modeParam === "review"
+          modeParam === "review" ||
+          modeParam === "smart"
             ? modeParam
             : "";
         if (profileMode) {

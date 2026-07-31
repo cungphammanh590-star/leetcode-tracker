@@ -19,6 +19,7 @@ LEARNING_DEFAULTS: dict[str, Any] = {
     "list_mode": True,
     "kg_mode": True,
     "active_list_id": "hot100",
+    "smart_coach": False,
 }
 
 DEFAULTS: dict[str, Any] = {
@@ -42,6 +43,7 @@ CONFIG_KEYS = sorted(
         "learning.list_mode",
         "learning.kg_mode",
         "learning.active_list_id",
+        "learning.smart_coach",
     }
 )
 
@@ -103,9 +105,39 @@ def _normalize_config(data: dict[str, Any]) -> dict[str, Any]:
         data["learning"] = merged_l
     data["learning"]["list_mode"] = bool(data["learning"]["list_mode"])
     data["learning"]["kg_mode"] = bool(data["learning"]["kg_mode"])
+    data["learning"]["smart_coach"] = bool(data["learning"].get("smart_coach"))
     active = str(data["learning"].get("active_list_id") or "hot100").strip()
     data["learning"]["active_list_id"] = active or "hot100"
+    # 门闩：无 API 时强制视为关闭（配置里可仍存 true，UI 会禁用）
     return data
+
+
+def smart_coach_gate(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """智能教练门闩：是否可开、是否实际启用、原因。"""
+    data = cfg or load_config()
+    llm = data.get("llm") or {}
+    learning = data.get("learning") or {}
+    wanted = bool(learning.get("smart_coach"))
+    provider = str(llm.get("provider") or "ollama").strip().lower()
+    has_key = bool(str(llm.get("api_key") or "").strip())
+    can_enable = provider == "api" and has_key
+    reason = ""
+    if not can_enable:
+        if provider != "api":
+            reason = "智能教练需要云端 API（请在维护台选择 DeepSeek 并保存 Key）"
+        else:
+            reason = "请先在维护台填写并保存 API Key"
+    enabled = wanted and can_enable
+    return {
+        "wanted": wanted,
+        "can_enable": can_enable,
+        "enabled": enabled,
+        "reason": reason,
+    }
+
+
+def is_smart_coach_enabled() -> bool:
+    return bool(smart_coach_gate().get("enabled"))
 
 
 def load_config() -> dict[str, Any]:
@@ -154,7 +186,7 @@ def _set_nested(cfg: dict[str, Any], key: str, value: str) -> None:
         if sub not in LEARNING_DEFAULTS:
             raise ValueError(f"不支持的配置项: {key}")
         cfg.setdefault("learning", deepcopy(LEARNING_DEFAULTS))
-        if sub in {"list_mode", "kg_mode"}:
+        if sub in {"list_mode", "kg_mode", "smart_coach"}:
             cfg["learning"][sub] = value.strip().lower() in {"1", "true", "yes", "on"}
         else:
             cfg["learning"][sub] = value
@@ -174,6 +206,7 @@ def update_learning_config(
     list_mode: bool | None = None,
     kg_mode: bool | None = None,
     active_list_id: str | None = None,
+    smart_coach: bool | None = None,
 ) -> dict[str, Any]:
     cfg = load_config()
     learning = cfg.setdefault("learning", deepcopy(LEARNING_DEFAULTS))
@@ -184,12 +217,20 @@ def update_learning_config(
     if active_list_id is not None:
         aid = str(active_list_id).strip() or "hot100"
         learning["active_list_id"] = aid
+    if smart_coach is not None:
+        learning["smart_coach"] = bool(smart_coach)
     save_config(cfg)
     return load_config()
 
 
 def get_learning_config() -> dict[str, Any]:
-    return dict(load_config().get("learning") or LEARNING_DEFAULTS)
+    learning = dict(load_config().get("learning") or LEARNING_DEFAULTS)
+    gate = smart_coach_gate()
+    learning["smart_coach"] = bool(gate.get("wanted"))
+    learning["smart_coach_enabled"] = bool(gate.get("enabled"))
+    learning["can_enable_smart_coach"] = bool(gate.get("can_enable"))
+    learning["smart_coach_reason"] = str(gate.get("reason") or "")
+    return learning
 
 
 def set_config_value(key: str, value: str) -> dict[str, Any]:

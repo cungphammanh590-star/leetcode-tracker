@@ -33,13 +33,18 @@ from leetcode_tracker.core.submissions import (
     get_latest_submission_for_problem,
     get_submission_by_id,
 )
+from leetcode_tracker.infra.config import is_smart_coach_enabled
 from leetcode_tracker.infra.timeutil import china_today
 from leetcode_tracker.llm.provider import get_llm_settings
 
 _SESSION_LOCKS: dict[str, threading.Lock] = {}
 _SESSION_LOCKS_GUARD = threading.Lock()
 
-PROFILE_MODES = frozenset({"daily_review", "recommend", "review"})
+PROFILE_MODES = frozenset({"daily_review", "recommend", "review", "smart"})
+
+
+def _active_coach_kind() -> str:
+    return "smart" if is_smart_coach_enabled() else "classic"
 
 
 def _session_lock(session_id: str) -> threading.Lock:
@@ -83,17 +88,40 @@ def _session_payload(
         or str(session.get("context_markdown") or "")[:400],
         "graph": get_llm_settings().get("provider") or "ollama",
         "mode": mode or "",
+        "coach_kind": session.get("coach_kind") or "classic",
+        "smart_coach": is_smart_coach_enabled(),
     }
 
 
 def _prepare_profile_mode(conn: sqlite3.Connection, mode: str) -> dict[str, Any]:
-    """无 submission 的日回顾 / 推荐会话。"""
+    """无 submission 的日回顾 / 推荐 / 智能教练大厅会话。"""
     from leetcode_tracker.coach.daily_review import format_daily_review_local
     from leetcode_tracker.coach.daily_review import assemble_daily_facts
 
     day = china_today().isoformat()
     profile = build_user_profile(conn)
-    if mode == "daily_review":
+    if mode == "smart":
+        if not is_smart_coach_enabled():
+            raise ValueError("请先在学习偏好开启智能教练（需云端 API Key）")
+        synthetic_id = f"mode:smart:{day}"
+        due_n = int(profile.get("review_due_count") or 0)
+        weak = "、".join(profile.get("weak_tags") or []) or "（暂无）"
+        opening = (
+            f"你好，我是智能教练（{day}）。可以直接聊天；"
+            "想跟练某题时告诉我题号或标题，我会帮你绑定。"
+            f"今日到期复习 {due_n} 题；薄弱标签：{weak}。"
+        )
+        context = (
+            f"## 智能教练大厅\n- 日期：{day}\n"
+            f"- 到期复习：{due_n}\n"
+            f"- 薄弱标签：{weak}\n"
+            f"- 画像：{profile.get('summary_text')}\n"
+            "- 尚未绑定题目；用户可用自然语言要求绑定。\n"
+        )
+        status = "SmartLobby"
+        problem_id = 0
+        thread_hint = synthetic_id
+    elif mode == "daily_review":
         synthetic_id = f"mode:daily_review:{day}"
         opening = (
             f"今天是 {day}。我可以根据你今日入库的提交做事实回顾。"
@@ -140,6 +168,7 @@ def _prepare_profile_mode(conn: sqlite3.Connection, mode: str) -> dict[str, Any]
         opening=opening,
         context_markdown=context,
         submission_status=status,
+        coach_kind=_active_coach_kind(),
     )
     # thread_id 保持 session_id；synthetic submission_id 保证日级幂等
     _ = thread_hint
@@ -184,6 +213,7 @@ def prepare(
         opening=opening,
         context_markdown=str(ctx["markdown"]),
         submission_status=status,
+        coach_kind=_active_coach_kind(),
     )
     return _session_payload(
         session,
@@ -307,26 +337,38 @@ def chat_stream(
     reply_parts: list[str] = []
     done = False
     provider = str(get_llm_settings().get("provider") or "ollama")
+    smart = is_smart_coach_enabled()
     try:
+        if smart:
+            graph_name = "smart"
+            actions_hint = ["diagnose", "deep_analysis", "close"]
+        elif provider == "api":
+            graph_name = "api"
+            actions_hint = [
+                "diagnose",
+                "deep_analysis",
+                "recommend",
+                "review",
+                "daily_review",
+            ]
+        else:
+            graph_name = "local"
+            actions_hint = [
+                "close",
+                "show_skeleton",
+                "recommend",
+                "review",
+                "daily_review",
+            ]
         yield {
             "type": "ready",
             "session_id": session_id,
-            "graph": "api" if provider == "api" else "local",
-            "actions_hint": (
-                [
-                    "diagnose",
-                    "deep_analysis",
-                    "recommend",
-                    "review",
-                    "daily_review",
-                ]
-                if provider == "api"
-                else ["close", "show_skeleton", "recommend", "review", "daily_review"]
-            ),
+            "graph": graph_name,
+            "actions_hint": actions_hint,
         }
 
-        # API：结束本轮与诊断合并为 diagnose
-        if provider == "api" and action == "close":
+        # API：结束本轮与诊断合并为 diagnose（智能教练保留 close/diagnose 语义）
+        if not smart and provider == "api" and action == "close":
             action = "diagnose"
 
         session, sync_meta = maybe_sync_session_submission(conn, session)
@@ -366,10 +408,37 @@ def chat_stream(
                 "type": "done",
                 "done": False,
                 "reply": reply,
-                "graph": "api" if provider == "api" else "local",
+                "graph": graph_name,
                 "side_skill": action,
                 "from_cache": from_cache,
             }
+            return
+
+        # 智能教练：与 LocalGraph/ApiGraph 互斥分流
+        if smart:
+            from leetcode_tracker.coach.smart_agent import chat_stream as smart_stream
+
+            for event in smart_stream(
+                conn,
+                session,
+                message,
+                action=action,
+                cancel_event=stop,
+            ):
+                if event.get("type") == "ready":
+                    continue
+                if event.get("type") in {
+                    "token",
+                    "fallback",
+                    "answer_egress",
+                    "diagnose",
+                    "deep_analysis",
+                }:
+                    reply_parts.append(str(event.get("text") or ""))
+                if event.get("type") == "done":
+                    done = bool(event.get("done"))
+                yield event
+            touch_session(conn, session_id)
             return
 
         current_code, code_lang = _load_current_code(conn, session)
