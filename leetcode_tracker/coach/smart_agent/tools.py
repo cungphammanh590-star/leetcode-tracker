@@ -249,6 +249,162 @@ def session_binding(session: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def get_latest_submission_global(conn: sqlite3.Connection) -> dict[str, Any]:
+    """库内全局最近一条提交（含题页链接）。"""
+    from leetcode_tracker.coach.smart_agent.offer import problem_url
+
+    row = conn.execute(
+        """
+        SELECT s.problem_id, s.status, s.submitted_at, s.language,
+               COALESCE(p.title, '') AS title,
+               COALESCE(p.slug, '') AS slug,
+               COALESCE(p.difficulty, '') AS difficulty
+        FROM submissions s
+        LEFT JOIN problems p ON p.problem_id = s.problem_id
+        ORDER BY s.submitted_at DESC, s.id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    if not row:
+        return {"ok": False, "note": "库中尚无提交记录"}
+    pid = int(row["problem_id"])
+    slug = str(row["slug"] or "")
+    return {
+        "ok": True,
+        "problem_id": pid,
+        "title": str(row["title"] or pid),
+        "status": str(row["status"] or ""),
+        "submitted_at": str(row["submitted_at"] or ""),
+        "language": str(row["language"] or ""),
+        "difficulty": str(row["difficulty"] or ""),
+        "url": problem_url(slug, pid),
+        "note": "全局最近一条提交；不含源码",
+    }
+
+
+def get_user_profile_summary(conn: sqlite3.Connection) -> dict[str, Any]:
+    from leetcode_tracker.coach.profile import build_user_profile
+
+    profile = build_user_profile(conn)
+    return {
+        "ok": True,
+        "total_solved": profile.get("total_solved"),
+        "weak_tags": profile.get("weak_tags") or [],
+        "review_due_count": profile.get("review_due_count"),
+        "today": profile.get("today") or {},
+        "hot100_progress": profile.get("hot100_progress") or {},
+        "recent_attempts": profile.get("recent_attempts") or [],
+        "summary_text": profile.get("summary_text") or "",
+        "note": "只读画像聚合；无 AC 源码",
+    }
+
+
+def get_topic_mastery(conn: sqlite3.Connection, topic: str) -> dict[str, Any]:
+    topic = str(topic or "").strip()
+    if not topic:
+        return {"ok": False, "note": "请提供标签/知识点名称"}
+    like = f"%{topic}%"
+    rows = conn.execute(
+        """
+        SELECT problem_id, title, difficulty, struggle_score,
+               accepted_count, total_attempts, topic_tags, last_status
+        FROM problem_stats
+        WHERE topic_tags LIKE ? AND COALESCE(total_attempts, 0) > 0
+        ORDER BY struggle_score DESC
+        LIMIT 30
+        """,
+        (like,),
+    ).fetchall()
+    attempted = len(rows)
+    ac = sum(1 for r in rows if int(r["accepted_count"] or 0) > 0)
+    avg_struggle = (
+        round(sum(float(r["struggle_score"] or 0) for r in rows) / attempted, 3)
+        if attempted
+        else 0.0
+    )
+    hard = [
+        {
+            "problem_id": int(r["problem_id"]),
+            "title": r["title"],
+            "struggle_score": round(float(r["struggle_score"] or 0), 3),
+            "last_status": r["last_status"],
+        }
+        for r in rows[:5]
+    ]
+    return {
+        "ok": True,
+        "topic": topic,
+        "attempted": attempted,
+        "accepted": ac,
+        "avg_struggle": avg_struggle,
+        "top_struggle_problems": hard,
+        "note": "按 topic_tags 模糊匹配的聚合；非考试分数",
+    }
+
+
+def get_problem_mastery(conn: sqlite3.Connection, problem_id: int) -> dict[str, Any]:
+    from leetcode_tracker.coach.mastered import is_mastered
+
+    pid = int(problem_id or 0)
+    if pid <= 0:
+        return {"ok": False, "note": "需要有效题号"}
+    stats = get_problem_stats_row(conn, pid) or {}
+    row = _problem_row(conn, pid)
+    return {
+        "ok": True,
+        "problem_id": pid,
+        "title": (row or {}).get("title") or stats.get("title") or pid,
+        "mastered": is_mastered(conn, pid),
+        "accepted_count": stats.get("accepted_count"),
+        "total_attempts": stats.get("total_attempts"),
+        "struggle_score": round(float(stats.get("struggle_score") or 0), 3),
+        "last_status": stats.get("last_status"),
+        "topic_tags": stats.get("topic_tags") or [],
+        "note": "单题掌握/挣扎；无源码",
+    }
+
+
+def suggest_next_problems_tool(
+    conn: sqlite3.Connection, *, limit: int = 3
+) -> dict[str, Any]:
+    from leetcode_tracker.coach.profile import build_user_profile
+    from leetcode_tracker.coach.recommend import recommend_problems
+    from leetcode_tracker.coach.smart_agent.offer import list_unpassed_problems, problem_url
+
+    unpassed = list_unpassed_problems(conn, limit=limit)
+    if unpassed:
+        return {
+            "ok": True,
+            "mode": "continue_unpassed",
+            "candidates": unpassed,
+            "note": "优先未通过续刷；题号仅来自本列表",
+        }
+    profile = build_user_profile(conn)
+    cands = recommend_problems(
+        conn, weak_tags=list(profile.get("weak_tags") or []), limit=limit
+    )
+    slim = []
+    for c in cands:
+        pid = int(c.get("id") or c.get("problem_id") or 0)
+        if pid <= 0:
+            continue
+        slim.append(
+            {
+                "problem_id": pid,
+                "title": c.get("title"),
+                "url": c.get("url") or problem_url(str(c.get("slug") or ""), pid),
+                "reason": c.get("reason") or c.get("why") or "",
+                "difficulty": c.get("difficulty"),
+            }
+        )
+    return {
+        "ok": True,
+        "mode": "recommend_new",
+        "candidates": slim,
+        "note": "规则引擎候选；禁止推荐列表外题号",
+    }
+
+
 def run_tool(
     name: str,
     *,
@@ -289,6 +445,38 @@ def run_tool(
                 problem_id=pid,
                 query=str(args.get("query") or ""),
             ),
+            ensure_ascii=False,
+        )
+    if name == "get_latest_submission":
+        return json.dumps(get_latest_submission_global(conn), ensure_ascii=False)
+    if name == "get_user_profile_summary":
+        return json.dumps(get_user_profile_summary(conn), ensure_ascii=False)
+    if name == "get_topic_mastery":
+        return json.dumps(
+            get_topic_mastery(conn, str(args.get("topic") or "")),
+            ensure_ascii=False,
+        )
+    if name == "get_problem_mastery":
+        raw_pid = args.get("problem_id") or session.get("problem_id") or 0
+        try:
+            pid = int(raw_pid)
+        except (TypeError, ValueError):
+            pid = 0
+        return json.dumps(get_problem_mastery(conn, pid), ensure_ascii=False)
+    if name == "suggest_next_problems":
+        lim = args.get("limit") or 3
+        try:
+            lim_i = max(1, min(5, int(lim)))
+        except (TypeError, ValueError):
+            lim_i = 3
+        return json.dumps(
+            suggest_next_problems_tool(conn, limit=lim_i), ensure_ascii=False
+        )
+    if name == "list_unpassed_problems":
+        from leetcode_tracker.coach.smart_agent.offer import list_unpassed_problems
+
+        return json.dumps(
+            {"ok": True, "items": list_unpassed_problems(conn, limit=5)},
             ensure_ascii=False,
         )
     return json.dumps({"ok": False, "note": f"未知工具: {name}"}, ensure_ascii=False)
@@ -349,6 +537,76 @@ TOOL_SPECS = [
             "name": "get_last_advice",
             "description": "获取本会话上一轮助手建议摘要，用于对照验收用户是否按建议改码。",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_latest_submission",
+            "description": "读取库内全局最近一条提交的题号/状态/题页链接（不含源码）。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_unpassed_problems",
+            "description": "列出近期未通过（非 AC）的题目，用于续刷提议。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_user_profile_summary",
+            "description": "读取用户整体画像：薄弱标签、今日进度、到期复习、题单进度等。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_topic_mastery",
+            "description": "按标签/知识点聚合掌握与挣扎情况。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "标签名，如 动态规划"},
+                },
+                "required": ["topic"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_problem_mastery",
+            "description": "单题掌握/挣扎统计；可省略 problem_id 则用当前绑定题。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "problem_id": {"type": "integer"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_next_problems",
+            "description": (
+                "选题：有未通过则返回续刷候选，否则返回规则引擎新题候选。"
+                "禁止推荐返回列表之外的题号。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "候选数量 1～5"},
+                },
+                "additionalProperties": False,
+            },
         },
     },
 ]

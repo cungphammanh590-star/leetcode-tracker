@@ -1,4 +1,4 @@
-"""陪练会话服务：模板即时启动，按 provider 分流 LocalGraph / ApiGraph。"""
+"""陪练会话服务：模板即时启动；智能教练走阶段图，经典走 LangChain 链。"""
 
 from __future__ import annotations
 
@@ -8,12 +8,7 @@ from collections.abc import Iterator
 from typing import Any, Optional
 
 from leetcode_tracker.coach.context import build_coach_context, refresh_context_code_block
-from leetcode_tracker.coach.graphs import graph_for_provider
-from leetcode_tracker.coach.graphs.common import (
-    GenerationCancelled,
-    filter_idents_in_code,
-    fold_opinions_on_code_change,
-)
+from leetcode_tracker.coach.graphs.common import GenerationCancelled
 from leetcode_tracker.coach.opening import template_opening
 from leetcode_tracker.coach.profile import build_user_profile
 from leetcode_tracker.coach.session_sync import (
@@ -287,9 +282,7 @@ def chat_stream(
     cancel_event: Optional[threading.Event] = None,
     lock_acquired: bool = False,
 ) -> Iterator[dict[str, Any]]:
-    """由 LocalGraph / ApiGraph 执行单回合；事件含 ready/token/offer_exit/done/…"""
-    from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
-
+    """智能教练走阶段图；经典走 LangChain 链。事件含 ready/token/offer_exit/done/…"""
     action = str(action or "").strip()
     if action and action not in ACTIONS:
         yield {"type": "error", "message": f"未知 action: {action}"}
@@ -414,7 +407,7 @@ def chat_stream(
             }
             return
 
-        # 智能教练：与 LocalGraph/ApiGraph 互斥分流
+        # 智能教练：LangGraph 阶段图
         if smart:
             from leetcode_tracker.coach.smart_agent import chat_stream as smart_stream
 
@@ -441,6 +434,9 @@ def chat_stream(
             touch_session(conn, session_id)
             return
 
+        # 经典陪练：LangChain 链
+        from leetcode_tracker.coach.classic_chain import chat_stream as classic_stream
+
         current_code, code_lang = _load_current_code(conn, session)
         context_markdown = refresh_context_code_block(
             str(session.get("context_markdown") or ""),
@@ -448,129 +444,30 @@ def chat_stream(
             language=code_lang,
         )
         code_epoch_bumped = bool(sync_meta and sync_meta.get("code_changed"))
-        with graph_for_provider(
-            stop, session_id=session_id, thread_id=thread_id, provider=provider
-        ) as graph:
-            config = {"configurable": {"thread_id": thread_id}}
-            snapshot = graph.get_state(config)
-            prior_messages = list(
-                _snapshot_value(snapshot, "messages", []) or []
-            )
-            has_messages = bool(prior_messages)
-            context_summary = str(
-                _snapshot_value(snapshot, "context_summary", "") or ""
-            )
-            rejected = list(
-                _snapshot_value(snapshot, "rejected_suspicions", []) or []
-            )
-            idents = list(
-                _snapshot_value(snapshot, "mentioned_identifiers", []) or []
-            )
-            messages: list[Any]
-
-            if code_epoch_bumped:
-                context_summary = fold_opinions_on_code_change(
-                    prior_messages,
-                    prev_summary=context_summary,
-                    from_status=str((sync_meta or {}).get("from_status") or ""),
-                    to_status=str((sync_meta or {}).get("to_status") or ""),
-                )
-                rejected = []
-                idents = filter_idents_in_code(idents, current_code)
-                removes = [
-                    RemoveMessage(id=m.id)
-                    for m in prior_messages
-                    if getattr(m, "id", None)
-                ]
-                if removes:
-                    graph.update_state(
-                        config,
-                        {
-                            "messages": removes,
-                            "context_summary": context_summary,
-                            "rejected_suspicions": rejected,
-                            "mentioned_identifiers": idents,
-                        },
-                    )
-                messages = [HumanMessage(content=message)]
-            elif not has_messages:
-                messages = [
-                    AIMessage(content=str(session["opening"])),
-                    HumanMessage(content=message),
-                ]
-            else:
-                messages = [HumanMessage(content=message)]
-
-            graph_input = {
-                "messages": messages,
-                "context_markdown": context_markdown,
-                "submission_status": str(session.get("submission_status") or ""),
-                "done": bool(_snapshot_value(snapshot, "done", False)),
-                "fallback_turn_count": int(
-                    _snapshot_value(snapshot, "fallback_turn_count", 0) or 0
-                ),
-                "generation_error": "",
-                "provider_failover": False,
-                "turn_count": int(_snapshot_value(snapshot, "turn_count", 0) or 0),
-                "rejected_suspicions": rejected,
-                "mentioned_identifiers": idents,
-                "exit_offered": bool(_snapshot_value(snapshot, "exit_offered", False)),
-                "degraded": bool(_snapshot_value(snapshot, "degraded", False)),
-                "pending_action": action,
-                "problem_id": int(session.get("problem_id") or 0),
-                "last_assistant_text": str(
-                    _snapshot_value(snapshot, "last_assistant_text", "") or ""
-                ),
-                "guardrail_stripped": bool(
-                    _snapshot_value(snapshot, "guardrail_stripped", False)
-                ),
-                "consecutive_vague": int(
-                    _snapshot_value(snapshot, "consecutive_vague", 0) or 0
-                ),
-                "context_summary": context_summary,
-                "code_epoch_bumped": code_epoch_bumped,
-                "user_profile": user_profile,
-                "current_code": current_code,
-                "intent": str(_snapshot_value(snapshot, "intent", "") or ""),
-                "analysis_result": str(
-                    _snapshot_value(snapshot, "analysis_result", "") or ""
-                ),
-                "candidate_recommendations": list(
-                    _snapshot_value(snapshot, "candidate_recommendations", []) or []
-                ),
-            }
-            for mode, data in graph.stream(
-                graph_input,
-                config,
-                stream_mode=["custom", "updates"],
-            ):
-                if stop.is_set():
-                    raise GenerationCancelled()
-                if mode != "custom" or not isinstance(data, dict):
-                    continue
-                event = dict(data)
-                if event.get("type") in {
-                    "token",
-                    "fallback",
-                    "answer_egress",
-                    "diagnose",
-                    "deep_analysis",
-                }:
-                    reply_parts.append(str(event.get("text") or ""))
-                yield event
-            final_snapshot = graph.get_state(config)
-            done = bool(
-                final_snapshot.values.get("done")
-                if final_snapshot and final_snapshot.values
-                else False
-            )
+        for event in classic_stream(
+            conn,
+            session,
+            message,
+            action=action,
+            cancel_event=stop,
+            user_profile=user_profile,
+            current_code=current_code,
+            context_markdown=context_markdown,
+            code_epoch_bumped=code_epoch_bumped,
+            provider=provider,
+        ):
+            if event.get("type") in {
+                "token",
+                "fallback",
+                "answer_egress",
+                "diagnose",
+                "deep_analysis",
+            }:
+                reply_parts.append(str(event.get("text") or ""))
+            if event.get("type") == "done":
+                done = bool(event.get("done"))
+            yield event
         touch_session(conn, session_id)
-        yield {
-            "type": "done",
-            "done": done,
-            "reply": "".join(reply_parts),
-            "graph": "api" if provider == "api" else "local",
-        }
     except GenerationCancelled:
         return
     except Exception as exc:  # noqa: BLE001

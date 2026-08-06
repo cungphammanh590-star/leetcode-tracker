@@ -153,7 +153,9 @@ CREATE TABLE IF NOT EXISTS user_problem_flags (
 def connect(path: Path | None = None) -> sqlite3.Connection:
     target = path or db_path()
     ensure_parent(target)
-    conn = sqlite3.connect(str(target), timeout=5.0)
+    # check_same_thread=False：陪练 SSE 在工作线程跑，LangGraph 节点/checkpoint
+    # 也可能切线程；同库多连接靠 WAL + busy_timeout 协调。
+    conn = sqlite3.connect(str(target), timeout=5.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")

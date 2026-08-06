@@ -1,4 +1,4 @@
-"""推荐 / 日回顾 / 优化 等共享节点逻辑（供 LocalGraph / ApiGraph 调用）。"""
+"""推荐 / 日回顾 / 优化 等共享节点逻辑（供经典链调用）。"""
 
 from __future__ import annotations
 
@@ -113,9 +113,9 @@ def run_recommend_node(
     provider: str,
 ) -> dict[str, Any]:
     from langchain_core.messages import AIMessage, HumanMessage
-    from langgraph.config import get_stream_writer
+    from leetcode_tracker.coach.graphs.common import emit_stream_event
 
-    writer = get_stream_writer()
+    writer = emit_stream_event
     profile = state.get("user_profile") or {}
     weak = list(profile.get("weak_tags") or [])
     # 当前题标签（若有）用于同标签巩固
@@ -187,9 +187,9 @@ def run_review_node(
 ) -> dict[str, Any]:
     """今日复习：只出到期旧题。"""
     from langchain_core.messages import AIMessage, HumanMessage
-    from langgraph.config import get_stream_writer
+    from leetcode_tracker.coach.graphs.common import emit_stream_event
 
-    writer = get_stream_writer()
+    writer = emit_stream_event
     profile = state.get("user_profile") or {}
     weak = list(profile.get("weak_tags") or [])
     conn = init_db()
@@ -239,9 +239,9 @@ def run_daily_review_node(
     provider: str,
 ) -> dict[str, Any]:
     from langchain_core.messages import AIMessage, HumanMessage
-    from langgraph.config import get_stream_writer
+    from leetcode_tracker.coach.graphs.common import emit_stream_event
 
-    writer = get_stream_writer()
+    writer = emit_stream_event
     facts = assemble_daily_facts(state.get("user_profile"))
     local_text = format_daily_review_local(facts)
 
@@ -284,9 +284,9 @@ def run_optimize_local(
     红线：历史 AC 的 source_code 不得进入 system/user prompt（仅特征对比结论）。
     """
     from langchain_core.messages import AIMessage, SystemMessage
-    from langgraph.config import get_stream_writer
+    from leetcode_tracker.coach.graphs.common import emit_stream_event
 
-    writer = get_stream_writer()
+    writer = emit_stream_event
     pid = int(state.get("problem_id") or 0)
     user_code = str(state.get("current_code") or "")
     user_feat = extract_code_features(user_code, language="python")
@@ -362,9 +362,9 @@ def run_optimize_api(
     thread_id: str,
 ) -> dict[str, Any]:
     from langchain_core.messages import AIMessage, SystemMessage
-    from langgraph.config import get_stream_writer
+    from leetcode_tracker.coach.graphs.common import emit_stream_event
 
-    writer = get_stream_writer()
+    writer = emit_stream_event
     extra = (
         "## 本轮任务：优化分析\n"
         "对比题目复杂度要求与用户当前代码，指出瓶颈类型（循环嵌套 / 数据结构 / 冗余计算等）"

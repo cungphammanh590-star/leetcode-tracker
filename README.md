@@ -143,16 +143,17 @@ leetcode-tracker config set port 9000
                 │
                 ▼
          stream（SSE 多轮）
-           ├─ 经典陪练：LocalGraph（Ollama）/ ApiGraph（DeepSeek）
-           ├─ 智能教练：Tool-calling Agent（仅云端，v1.0）
+           ├─ 经典陪练：LangChain 链（Ollama / DeepSeek）
+           ├─ 智能教练：LangGraph 阶段图（仅云端，v1.0）
            └─ 今日总结 / 复习 / 推荐：规则选题 + 可选润色
 ```
 
 - **只追踪**：不必装 Ollama，也不必填 API Key  
 - **本地模型**：启动 Ollama 并拉取模型后，到陪练页发消息  
 - **云端**：维护台「陪练模型」选 DeepSeek，填 Key 后保存  
-- **智能教练**：学习偏好或维护台开启；**必须**云端 API + Key（本地 Ollama 不可开）。题内多轮走 Agent；总结 / 复习 / 推荐仍走免费规则  
-- 模型超时有兜底回复，**不影响提交采集**
+- **智能教练**：学习偏好或维护台开启；**必须**云端 API + Key。首轮意图分流；空闲可续刷/新荐；总结/复习/推荐旁路仍走规则  
+- 模型超时有兜底回复，**不影响提交采集**  
+- 开发观测（可选）：`LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY`（维护台不配；详见 `docs/COACH.md`）
 
 缺 `langchain-*` 等依赖时：再执行一次 `pip install ".[coach]"` 或 `pip install "leetcode-tracker[coach]"`，然后重启 `serve`。
 
@@ -209,7 +210,7 @@ leetcode-tracker config set port 9000
 
 ## 技术栈
 
-Python · FastAPI · SQLite · Chrome MV3 扩展 · 可选 LangGraph / Ollama / DeepSeek
+Python · FastAPI · SQLite · Chrome MV3 扩展 · 可选 LangGraph（智能教练）/ LangChain（经典陪练）/ Ollama / DeepSeek
 
 ## License
 

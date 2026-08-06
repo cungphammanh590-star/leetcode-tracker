@@ -1,11 +1,14 @@
-"""双图共享：结束语、否定抽取、模型调用、checkpoint 连接。"""
+"""陪练共享：结束语、否定抽取、模型调用、流式事件、checkpoint 连接。"""
 
 from __future__ import annotations
 
+import contextvars
 import re
 import sqlite3
 import threading
-from typing import Any
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from typing import Any, Optional
 
 from leetcode_tracker.coach.debug_log import log_llm_turn
 from leetcode_tracker.coach.exit_detect import is_vague_user_message
@@ -15,9 +18,39 @@ from leetcode_tracker.coach.state import END_PHRASES, NEGATION_PHRASES
 from leetcode_tracker.infra.paths import db_path
 from leetcode_tracker.llm.provider import build_chat_model
 
+_custom_stream_writer: contextvars.ContextVar[
+    Optional[Callable[[dict[str, Any]], None]]
+] = contextvars.ContextVar("leetcode_custom_stream_writer", default=None)
+
 
 class GenerationCancelled(Exception):
     """客户端断开后停止消费模型流。"""
+
+
+@contextmanager
+def stream_writer_scope(
+    writer: Callable[[dict[str, Any]], None],
+) -> Iterator[None]:
+    """经典链等非 LangGraph 路径注入 SSE writer。"""
+    token = _custom_stream_writer.set(writer)
+    try:
+        yield
+    finally:
+        _custom_stream_writer.reset(token)
+
+
+def emit_stream_event(event: dict[str, Any]) -> None:
+    """优先自定义 writer，否则尝试 LangGraph get_stream_writer。"""
+    custom = _custom_stream_writer.get()
+    if callable(custom):
+        custom(event)
+        return
+    try:
+        from langgraph.config import get_stream_writer
+
+        get_stream_writer()(event)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def is_done_message(text: str) -> bool:

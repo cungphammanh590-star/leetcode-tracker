@@ -1,4 +1,4 @@
-"""智能教练 Agent：题内多轮跟练（与 LocalGraph/ApiGraph 解耦）。"""
+"""智能教练：LangGraph 阶段图（首轮意图 / 空闲提议 / 题内工具）。"""
 
 from leetcode_tracker.coach.smart_agent.stream import chat_stream
 

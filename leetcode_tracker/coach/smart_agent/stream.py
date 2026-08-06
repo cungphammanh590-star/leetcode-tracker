@@ -1,44 +1,23 @@
-"""智能教练 SSE 对话流。"""
+"""智能教练 SSE：LangGraph 阶段图驱动。"""
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
 from collections.abc import Iterator
 from typing import Any, Optional
 
-from leetcode_tracker.coach.graphs.common import GenerationCancelled
-from leetcode_tracker.coach.guardrail import apply_code_block_guardrail
-from leetcode_tracker.coach.smart_agent.history import load_history, save_history
-from leetcode_tracker.coach.smart_agent.tools import (
-    MAX_TOOL_ROUNDS,
-    TOOL_SPECS,
-    run_tool,
+from leetcode_tracker.coach.graphs.common import (
+    GenerationCancelled,
+    close_checkpoint_graph,
 )
-from leetcode_tracker.llm.provider import build_chat_model, get_llm_settings
-
-_SYSTEM = """你是「智能教练」：苏格拉底式刷题陪练，用中文简短回应。
-
-规则：
-1. 会话可能尚未绑定题目（大厅模式）。用户提到题号或标题时，先用 bind_problem 绑定，再辅导。
-2. 可用工具：get_session_binding / bind_problem / get_current_code / get_error_summary / get_last_advice。
-3. 优先提问与定位，不要直接给完整可运行解法；禁止输出 markdown 代码块与整段源码。
-4. 对照上次建议验收时：若最新提交无变化，须明确说明「库里还没有更新的提交」，不要假装已验证。
-5. 绝不索取或复述历史 Accepted 源码；工具也不会提供。
-6. 每次回复控制在几段以内，可给 1～2 个可执行的小检查点。
-"""
-
-
-def _action_prompt(action: str) -> str:
-    mapping = {
-        "close": "请收束本轮：总结我当前卡点与下一步，然后结束对话口吻收尾。",
-        "diagnose": "请给出简短代码审查式诊断（2～4 点），引用真实标识符，不要给完整解法。",
-        "deep_analysis": "请用文字步骤 + 伪代码级说明讲清思路，仍禁止完整可运行代码与代码块。",
-        "optimize": "请从可读性/复杂度角度给优化方向，不要贴完整重构代码。",
-        "show_skeleton": "请用文字骨架描述思路步骤，禁止完整源码与代码块。",
-    }
-    return mapping.get(action, "")
+from leetcode_tracker.coach.profile import build_user_profile
+from leetcode_tracker.coach.smart_agent.graph import (
+    _action_prompt,
+    compile_smart_graph,
+)
+from leetcode_tracker.coach.smart_agent.phases import coerce_phase
+from leetcode_tracker.llm.provider import get_llm_settings
 
 
 def chat_stream(
@@ -49,13 +28,8 @@ def chat_stream(
     action: str = "",
     cancel_event: Optional[threading.Event] = None,
 ) -> Iterator[dict[str, Any]]:
-    """Agent 单回合；事件含 ready/token/done/error。"""
-    from langchain_core.messages import (
-        AIMessage,
-        HumanMessage,
-        SystemMessage,
-        ToolMessage,
-    )
+    """Smart LangGraph 单回合；事件含 ready/token/info/done/error。"""
+    from langchain_core.messages import AIMessage, HumanMessage
 
     stop = cancel_event or threading.Event()
     session_id = str(session["session_id"])
@@ -83,120 +57,84 @@ def chat_stream(
         "actions_hint": ["diagnose", "deep_analysis", "close"],
     }
 
-    history = load_history(conn, session_id)
-    if not history and session.get("opening"):
-        history.append(
-            {"role": "assistant", "content": str(session.get("opening") or "")}
-        )
-
-    outbound: list[Any] = [SystemMessage(content=_SYSTEM)]
-    for item in history:
-        if item["role"] == "user":
-            outbound.append(HumanMessage(content=item["content"]))
-        else:
-            outbound.append(AIMessage(content=item["content"]))
-    outbound.append(HumanMessage(content=user_text))
-
+    graph = None
     try:
-        model = build_chat_model()
-        bound = model.bind_tools(TOOL_SPECS)
-        tool_rounds = 0
-        while tool_rounds < MAX_TOOL_ROUNDS:
+        profile = build_user_profile(conn)
+        graph = compile_smart_graph(stop, session=session)
+        config = {"configurable": {"thread_id": f"smart:{thread_id}"}}
+        snapshot = graph.get_state(config)
+        values = (snapshot.values if snapshot else {}) or {}
+        prior = list(values.get("messages") or [])
+        phase = coerce_phase(values.get("phase"))
+        turn_count = int(values.get("turn_count") or 0)
+        refuse_short = bool(values.get("refuse_short"))
+
+        messages: list[Any] = []
+        if not prior and session.get("opening"):
+            messages.append(AIMessage(content=str(session.get("opening") or "")))
+        messages.append(HumanMessage(content=user_text))
+
+        bound_pid = int(session.get("problem_id") or 0)
+        # prepare 已带题 → 直接题内
+        if bound_pid > 0 and phase == "lobby" and turn_count == 0:
+            phase = "in_problem"
+
+        graph_input = {
+            "messages": messages,
+            "phase": phase,
+            "intent": str(values.get("intent") or ""),
+            "turn_count": turn_count,
+            "pending_action": action,
+            "problem_id": bound_pid,
+            "allow_code_原文": False,
+            "route": "",
+            "reply": "",
+            "done": False,
+            "offer_cta": "",
+            "user_profile": profile,
+            "refuse_short": refuse_short,
+        }
+
+        reply = ""
+        done = False
+        for mode, data in graph.stream(
+            graph_input,
+            config,
+            stream_mode=["custom", "updates"],
+        ):
             if stop.is_set():
                 raise GenerationCancelled()
-            ai = bound.invoke(outbound)
-            tool_calls = getattr(ai, "tool_calls", None) or []
-            if not tool_calls:
-                # 无工具：流式再生成最终回复（避免 invoke 已消耗一轮时重复计费）
-                content = getattr(ai, "content", "") or ""
-                if isinstance(content, list):
-                    content = "".join(
-                        str(p.get("text") if isinstance(p, dict) else p) for p in content
-                    )
-                reply = str(content).strip()
-                if not reply:
-                    # 兜底再 stream 一次
-                    reply = _stream_text(model, outbound, stop)
-                reply, _ = apply_code_block_guardrail(reply)
-                if reply:
-                    yield {"type": "token", "text": reply}
-                history.append({"role": "user", "content": user_text})
-                history.append({"role": "assistant", "content": reply})
-                save_history(conn, session_id, history)
-                done = action in {"close", "diagnose"}
-                yield {
-                    "type": "done",
-                    "done": done,
-                    "reply": reply,
-                    "graph": "smart",
-                }
-                return
+            if mode == "custom" and isinstance(data, dict):
+                event = dict(data)
+                if event.get("type") == "token":
+                    reply = str(event.get("text") or reply)
+                yield event
+            elif mode == "updates" and isinstance(data, dict):
+                for _node, update in data.items():
+                    if isinstance(update, dict):
+                        if update.get("reply"):
+                            reply = str(update.get("reply") or reply)
+                        if "done" in update:
+                            done = bool(update.get("done"))
 
-            outbound.append(ai)
-            for call in tool_calls:
-                if stop.is_set():
-                    raise GenerationCancelled()
-                if isinstance(call, dict):
-                    name = str(call.get("name") or "")
-                    call_id = str(call.get("id") or name or "tool")
-                    args = call.get("args") or call.get("arguments") or {}
-                else:
-                    name = str(getattr(call, "name", "") or "")
-                    call_id = str(getattr(call, "id", "") or name or "tool")
-                    args = getattr(call, "args", None) or {}
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except json.JSONDecodeError:
-                        args = {}
-                if not isinstance(args, dict):
-                    args = {}
-                result = run_tool(
-                    name,
-                    conn=conn,
-                    session=session,
-                    history=history,
-                    args=args,
-                )
-                outbound.append(
-                    ToolMessage(content=result, tool_call_id=call_id)
-                )
-            tool_rounds += 1
+        final = graph.get_state(config)
+        if final and final.values:
+            done = bool(final.values.get("done")) or done
+            reply = str(final.values.get("reply") or reply)
 
-        # 工具轮次用尽：强制无工具作答
-        if stop.is_set():
-            raise GenerationCancelled()
-        outbound.append(
-            HumanMessage(
-                content="（系统）工具调用已达上限，请基于已有观察直接作答，勿再调工具。"
-            )
-        )
-        reply = _stream_text(model, outbound, stop)
-        reply, _ = apply_code_block_guardrail(reply)
-        if reply:
-            yield {"type": "token", "text": reply}
-        history.append({"role": "user", "content": user_text})
-        history.append({"role": "assistant", "content": reply})
-        save_history(conn, session_id, history)
-        done = action in {"close", "diagnose"}
-        yield {"type": "done", "done": done, "reply": reply, "graph": "smart"}
+        yield {
+            "type": "done",
+            "done": done,
+            "reply": reply,
+            "graph": "smart",
+            "phase": coerce_phase(
+                (final.values if final else {}).get("phase") if final else phase
+            ),
+        }
     except GenerationCancelled:
         return
     except Exception as exc:  # noqa: BLE001
         yield {"type": "error", "message": str(exc)}
-
-
-def _stream_text(model: Any, outbound: list[Any], stop: threading.Event) -> str:
-    accumulated = ""
-    for chunk in model.stream(outbound):
-        if stop.is_set():
-            raise GenerationCancelled()
-        piece = getattr(chunk, "content", None)
-        if not piece:
-            continue
-        text = piece if isinstance(piece, str) else str(piece)
-        if text:
-            accumulated += text
-    if not accumulated.strip():
-        raise RuntimeError("模型未返回内容")
-    return accumulated.strip()
+    finally:
+        if graph is not None:
+            close_checkpoint_graph(graph)
